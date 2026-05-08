@@ -18,6 +18,11 @@ if [[ -f "${LOCAL_ENV_FILE}" ]]; then
   source "${LOCAL_ENV_FILE}"
 fi
 
+# 使用 sudo 时 root 的 PATH 往往不含官方 Go；从官网解压到 /usr/local/go 时需前置该目录
+if [[ -x /usr/local/go/bin/go ]]; then
+  export PATH="/usr/local/go/bin:${PATH}"
+fi
+
 DEPLOY_ROOT="${DEPLOY_ROOT:-/opt/noteapi}"
 BIN_NAME="${BIN_NAME:-noteapi}"
 BIN_PATH="${DEPLOY_ROOT}/bin/${BIN_NAME}"
@@ -38,8 +43,11 @@ require_root_for_systemd() {
 }
 
 ensure_go() {
+  if ! command -v go >/dev/null 2>&1 && [[ -x /usr/local/go/bin/go ]]; then
+    export PATH="/usr/local/go/bin:${PATH}"
+  fi
   if ! command -v go >/dev/null 2>&1; then
-    die "未检测到 go，请先安装 Go 1.22+（例如: apt install golang-go 或从 https://go.dev/dl 安装）"
+    die "未检测到 go。若已安装到 /usr/local/go，请确认存在 /usr/local/go/bin/go；否则请安装 Go 1.22+： https://go.dev/dl （sudo 下若仍报错，可先执行: export PATH=/usr/local/go/bin:\$PATH）"
   fi
   go version
 }
