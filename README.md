@@ -47,7 +47,7 @@ export APPLE_CLIENT_ID='com.example.app'   # 与 identity_token 的 aud 一致
 go run ./cmd/noteapi
 ```
 
-默认监听 `:8080`，可通过 `LISTEN_ADDR` 修改。
+默认监听 `:9443`，可通过 `LISTEN_ADDR` 修改。
 
 ## 微信支付 APIv3（可选，商户就绪后配置）
 

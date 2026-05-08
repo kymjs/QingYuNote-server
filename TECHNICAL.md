@@ -209,7 +209,7 @@ Prepay 200：`app_id`、`partner_id`、`prepay_id`、`package`、`nonce_str`、`
 
 | 变量 | 用途 |
 |------|------|
-| `LISTEN_ADDR` | 监听地址，默认 `:8080` |
+| `LISTEN_ADDR` | 监听地址，默认 `:9443` |
 | `MYSQL_DSN` | MySQL DSN，必填 |
 | `JWT_SECRET` | JWT 密钥 |
 | `WECHAT_APP_ID` / `WECHAT_APP_SECRET` | 微信开放平台应用 |

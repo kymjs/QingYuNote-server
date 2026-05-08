@@ -107,7 +107,7 @@ cmd_first_time() {
   log "       mysql ... < ${SERVER_ROOT}/migrations/001_init.sql"
   log "       mysql ... < ${SERVER_ROOT}/migrations/002_user_identities.sql"
   log "  3) systemctl start ${SERVICE_NAME} && systemctl status ${SERVICE_NAME}"
-  log "  4) 配置 Nginx/Caddy 反代到 LISTEN_ADDR（默认 :8080）"
+  log "  4) 配置 Nginx/Caddy 反代到 LISTEN_ADDR（默认 :9443）"
   log ""
 }
 

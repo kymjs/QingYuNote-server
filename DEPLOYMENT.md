@@ -48,8 +48,8 @@
 4. **配置环境变量**：复制 `server/.env.example` 为机器上的机密文件（例如 `/etc/noteapi.env`），填写 `MYSQL_DSN`、`JWT_SECRET`、各业务变量。
 5. **编译**：在 `server` 目录执行 `go build -o /usr/local/bin/noteapi ./cmd/noteapi`（路径可自定）。
 6. **systemd**：使用 `scripts/noteapi.service` 模板，把 `EnvironmentFile` 指向上面的 env 文件，`ExecStart` 指向二进制与监听地址。
-7. **反向代理**：Nginx/Caddy 将 `https://noteapi.kymjs.com` 反代到 `127.0.0.1:8080`（或你在 `LISTEN_ADDR` 设的端口）。
-8. **防火墙**：在 Ubuntu 上通常用 **ufw**（见上文）；反代只监听 443 时，Go 可只绑 `127.0.0.1:8080`（`LISTEN_ADDR=127.0.0.1:8080`），不必对公网开放 8080。
+7. **反向代理**：Nginx/Caddy 将 `https://noteapi.kymjs.com` 反代到 `127.0.0.1:9443`（或你在 `LISTEN_ADDR` 设的端口）。
+8. **防火墙**：在 Ubuntu 上通常用 **ufw**（见上文）；反代只监听 443 时，Go 可只绑 `127.0.0.1:9443`（`LISTEN_ADDR=127.0.0.1:9443`），不必对公网开放 9443。
 
 ---
 

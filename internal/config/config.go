@@ -50,7 +50,7 @@ func getenv(key, def string) string {
 
 func Load() *Config {
 	c := &Config{
-		ListenAddr: getenv("LISTEN_ADDR", ":8080"),
+		ListenAddr: getenv("LISTEN_ADDR", ":9443"),
 
 		MySQLDSN: getenv("MYSQL_DSN", ""),
 
