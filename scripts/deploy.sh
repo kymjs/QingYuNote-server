@@ -1,18 +1,32 @@
 #!/usr/bin/env bash
 # Note API 部署辅助脚本 — 针对 Ubuntu Server（apt + systemd）
 # 其他 Debian 系可尝试使用；非 systemd 环境请只使用 build-only 并自行守护进程。
-# 使用前请根据服务器修改下列默认值，或通过环境变量覆盖。
+#
+# 【机密不要写在本文件里】请复制 scripts/deploy.local.env.example 为
+#   scripts/deploy.local.env
+# 填写 MYSQL_* 等，chmod 600；该文件已列入 server/.gitignore。
+# 也可用环境变量覆盖下方各项。
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVER_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+LOCAL_ENV_FILE="${SCRIPT_DIR}/deploy.local.env"
+if [[ -f "${LOCAL_ENV_FILE}" ]]; then
+  # shellcheck disable=SC1090
+  source "${LOCAL_ENV_FILE}"
+fi
+
 DEPLOY_ROOT="${DEPLOY_ROOT:-/opt/noteapi}"
 BIN_NAME="${BIN_NAME:-noteapi}"
 BIN_PATH="${DEPLOY_ROOT}/bin/${BIN_NAME}"
 ENV_FILE="${ENV_FILE:-/etc/noteapi.env}"
 SERVICE_NAME="${SERVICE_NAME:-noteapi}"
 GIT_REMOTE_PULL="${GIT_REMOTE_PULL:-1}"
+
+MYSQL_HOST="${MYSQL_HOST:-127.0.0.1}"
+MYSQL_PORT="${MYSQL_PORT:-3306}"
 
 log() { printf '[deploy] %s\n' "$*"; }
 die() { printf '[deploy] ERROR: %s\n' "$*" >&2; exit 1; }
@@ -104,6 +118,24 @@ cmd_build_only() {
   log "二进制: ${BIN_PATH}"
 }
 
+cmd_migrate() {
+  [[ -n "${MYSQL_USER:-}" ]] || die "请在 deploy.local.env 中设置 MYSQL_USER（或导出环境变量）"
+  [[ -n "${MYSQL_PASSWORD:-}" ]] || die "请在 deploy.local.env 中设置 MYSQL_PASSWORD"
+  [[ -n "${MYSQL_DATABASE:-}" ]] || die "请在 deploy.local.env 中设置 MYSQL_DATABASE"
+  command -v mysql >/dev/null 2>&1 || die "未安装 mysql 客户端，请执行: apt install -y mysql-client"
+
+  export MYSQL_PWD="${MYSQL_PASSWORD}"
+  run_sql() {
+    local f="$1"
+    log "执行迁移: ${f}"
+    mysql -h"${MYSQL_HOST}" -P"${MYSQL_PORT}" -u"${MYSQL_USER}" "${MYSQL_DATABASE}" < "${f}"
+  }
+  run_sql "${SERVER_ROOT}/migrations/001_init.sql"
+  run_sql "${SERVER_ROOT}/migrations/002_user_identities.sql"
+  unset MYSQL_PWD
+  log "迁移完成（001 + 002）"
+}
+
 usage() {
   cat <<EOF
 用法: $(basename "$0") <命令>
@@ -112,6 +144,10 @@ usage() {
   first-time   首次安装依赖、编译、安装 systemd（需 root）
   update       git pull（若存在 .git）、编译、重启服务（需 root）
   build-only   仅编译到 \${DEPLOY_ROOT}/bin/\${BIN_NAME}（默认不需 root）
+  migrate      按 deploy.local.env 中的 MYSQL_* 执行 migrations/001、002（需 root；需 mysql 客户端）
+
+机密配置（勿提交 Git）:
+  复制 scripts/deploy.local.env.example -> scripts/deploy.local.env 并填写
 
 环境变量（可选）:
   DEPLOY_ROOT=${DEPLOY_ROOT}
@@ -132,6 +168,7 @@ main() {
     first-time) cmd_first_time ;;
     update)     cmd_update ;;
     build-only) cmd_build_only ;;
+    migrate)    cmd_migrate ;;
     ""|-h|--help|help) usage ;;
     *) die "未知命令: ${sub}" ;;
   esac

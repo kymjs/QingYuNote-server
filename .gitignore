@@ -1,0 +1,2 @@
+# 本机部署脚本中的机密（从 deploy.local.env.example 复制后填写）
+scripts/deploy.local.env

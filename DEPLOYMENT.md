@@ -68,14 +68,25 @@
 
 ---
 
-## 4. 一键脚本
+## 4. 一键脚本与 `deploy.local.env`（机密）
 
-仓库提供 **`scripts/deploy.sh`**，支持：
+**请勿把 MySQL 密码写进 `deploy.sh`**（脚本会进 Git）。在本机创建 **`server/scripts/deploy.local.env`**（已在 `server/.gitignore` 中忽略）：
 
-- `first-time`：安装常用依赖、创建部署目录、编译、提示迁移与 systemd（需 root 部分自选）。
-- `update`：在同一目录拉代码（可选）、`go build`、重启 `noteapi` 服务。
+```bash
+cp scripts/deploy.local.env.example scripts/deploy.local.env
+chmod 600 scripts/deploy.local.env
+nano scripts/deploy.local.env   # 填写 MYSQL_HOST / MYSQL_USER / MYSQL_PASSWORD / MYSQL_DATABASE
+```
 
-使用前请编辑脚本顶部的 **`DEPLOY_ROOT`**、**`ENV_FILE`** 等变量，或导出同名环境变量覆盖。
+`deploy.sh` 会自动加载同目录下的 `deploy.local.env`（若存在）。
+
+**`deploy.sh` 子命令**：
+
+- `first-time`：安装常用依赖、创建部署目录、编译、安装 systemd（需 root）。
+- `migrate`：按 `deploy.local.env` 中的 **`MYSQL_*`** 执行 `migrations/001`、`002`（需本机已安装 `mysql-client`）。
+- `update`：`git pull`（可选）、编译、重启 `noteapi`（需 root）。
+
+仍可通过环境变量覆盖 **`DEPLOY_ROOT`**、**`ENV_FILE`** 等。
 
 **执行示例**：
 
@@ -88,6 +99,9 @@ sudo ./scripts/deploy.sh first-time
 
 # 日常更新
 sudo ./scripts/deploy.sh update
+
+# 首次执行数据库迁移（填写好 deploy.local.env 后）
+sudo ./scripts/deploy.sh migrate
 ```
 
 ---
