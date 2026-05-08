@@ -106,14 +106,33 @@ sudo ./scripts/deploy.sh migrate
 
 ---
 
-## 5. 回滚建议
+## 5. `go build` 拉依赖超时（大陆网络）
+
+若出现 `proxy.golang.org` / `i/o timeout`，脚本已默认设置：
+
+- `GOPROXY=https://goproxy.cn,direct`
+- `GOSUMDB=sum.golang.google.cn`
+
+仍失败时可在执行前临时：
+
+```bash
+export GOPROXY=https://goproxy.io,direct
+export GOSUMDB=off
+sudo -E ./scripts/deploy.sh first-time
+```
+
+或在 `deploy.local.env` 里写上 `GOPROXY` / `GOSUMDB`（**`GOSUMDB=off` 会关闭校验，仅作权宜**）。
+
+---
+
+## 6. 回滚建议
 
 - 部署前备份：`mysqldump` 业务库。
 - 二进制保留上一份：`cp noteapi noteapi.bak` 再覆盖；异常时 `systemctl stop noteapi && cp noteapi.bak noteapi && systemctl start noteapi`。
 
 ---
 
-## 6. 安全清单
+## 7. 安全清单
 
 - `JWT_SECRET` 使用足够长的随机串。
 - `.env` / `/etc/noteapi.env` 权限 `600`，属主 root 或服务用户。

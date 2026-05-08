@@ -33,6 +33,11 @@ GIT_REMOTE_PULL="${GIT_REMOTE_PULL:-1}"
 MYSQL_HOST="${MYSQL_HOST:-127.0.0.1}"
 MYSQL_PORT="${MYSQL_PORT:-3306}"
 
+# 中国大陆等网络访问 proxy.golang.org 易超时；未指定时使用国内代理与校验镜像（可用环境变量覆盖）
+: "${GOPROXY:=https://goproxy.cn,direct}"
+: "${GOSUMDB:=sum.golang.google.cn}"
+export GOPROXY GOSUMDB
+
 log() { printf '[deploy] %s\n' "$*"; }
 die() { printf '[deploy] ERROR: %s\n' "$*" >&2; exit 1; }
 
@@ -55,7 +60,7 @@ ensure_go() {
 build_binary() {
   ensure_go
   mkdir -p "$(dirname "${BIN_PATH}")"
-  log "编译: ${SERVER_ROOT}/cmd/noteapi -> ${BIN_PATH}"
+  log "编译: ${SERVER_ROOT}/cmd/noteapi -> ${BIN_PATH}（GOPROXY=${GOPROXY}）"
   (cd "${SERVER_ROOT}" && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "${BIN_PATH}" ./cmd/noteapi)
   chmod 755 "${BIN_PATH}"
   log "编译完成"
