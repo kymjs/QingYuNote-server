@@ -1,0 +1,18 @@
+[Unit]
+Description=Qingyu Note API (noteapi)
+After=network.target mysql.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=__DEPLOY_ROOT__
+EnvironmentFile=-__ENV_FILE__
+ExecStart=__BIN_PATH__
+Restart=on-failure
+RestartSec=5
+
+# 若希望非 root 运行，请创建专用用户并修改 User= 与目录权限
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
