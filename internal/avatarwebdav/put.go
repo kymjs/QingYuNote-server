@@ -11,6 +11,19 @@ import (
 	"time"
 )
 
+// PutStatusError WebDAV 返回非 2xx 时使用，便于 API 层映射为细分错误码。
+type PutStatusError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *PutStatusError) Error() string {
+	if e == nil {
+		return ""
+	}
+	return fmt.Sprintf("put_status_%d: %s", e.StatusCode, e.Body)
+}
+
 // PutFile 使用 HTTP PUT 将文件上传到 WebDAV 路径 baseURL/filename。
 func PutFile(ctx context.Context, baseURL, webdavUser, webdavPass, filename string, body io.Reader, contentType string, size int64) error {
 	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
@@ -48,5 +61,8 @@ func PutFile(ctx context.Context, baseURL, webdavUser, webdavPass, filename stri
 		return nil
 	}
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	return fmt.Errorf("put_status_%d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	return &PutStatusError{
+		StatusCode: resp.StatusCode,
+		Body:       strings.TrimSpace(string(b)),
+	}
 }

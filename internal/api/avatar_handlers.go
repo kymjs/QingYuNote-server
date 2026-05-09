@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -15,6 +16,30 @@ import (
 )
 
 const maxAvatarBytes = 5 << 20 // 5 MiB
+
+// avatarWebDAVErrorCode 将 WebDAV Put 错误映射为对外 error 码（不含 NAS 响应原文）。
+func avatarWebDAVErrorCode(err error) string {
+	var ps *avatarwebdav.PutStatusError
+	if errors.As(err, &ps) && ps != nil {
+		switch ps.StatusCode {
+		case http.StatusUnauthorized:
+			return "avatar_webdav_unauthorized"
+		case http.StatusForbidden:
+			return "avatar_webdav_forbidden"
+		case http.StatusNotFound:
+			return "avatar_webdav_not_found"
+		case http.StatusMethodNotAllowed:
+			return "avatar_webdav_method_not_allowed"
+		case http.StatusInsufficientStorage:
+			return "avatar_webdav_insufficient_storage"
+		case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+			return "avatar_webdav_upstream_error"
+		default:
+			return "avatar_upload_failed"
+		}
+	}
+	return "avatar_upload_failed"
+}
 
 func sniffImage(b []byte) (contentType string, ext string) {
 	if len(b) >= 3 && b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF {
@@ -86,7 +111,7 @@ func (s *Server) handlePostAvatar(w http.ResponseWriter, r *http.Request, uid in
 		fname, bytes.NewReader(data), ct, int64(len(data)))
 	if err != nil {
 		log.Printf("avatar webdav put uid=%d: %v", uid, err)
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "avatar_upload_failed"})
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": avatarWebDAVErrorCode(err)})
 		return
 	}
 	if err := s.Store.PatchUserProfile(ctx, uid, nil, &publicURL, nil, nil); err != nil {
