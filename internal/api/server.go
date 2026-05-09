@@ -100,6 +100,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/me/subscription", s.auth(s.handleSubscription))
 	mux.HandleFunc("GET /api/v1/me/profile", s.auth(s.handleGetProfile))
 	mux.HandleFunc("PATCH /api/v1/me/profile", s.auth(s.handlePatchProfile))
+	mux.HandleFunc("POST /api/v1/me/avatar", s.auth(s.handlePostAvatar))
 	mux.HandleFunc("DELETE /api/v1/me", s.auth(s.handleDeleteAccount))
 	mux.HandleFunc("GET /api/v1/qingyu/webdav", s.auth(s.handleQingyuWebDAV))
 	mux.HandleFunc("POST /api/v1/orders", s.auth(s.handleCreateOrder))
@@ -424,9 +425,9 @@ func (s *Server) handleMergeApple(w http.ResponseWriter, r *http.Request, uid in
 }
 
 type subscriptionResp struct {
-	State       string `json:"state"`
-	ExpiresAt   string `json:"expires_at,omitempty"`
-	IsLifetime  bool   `json:"is_lifetime"`
+	State      string `json:"state"`
+	ExpiresAt  string `json:"expires_at,omitempty"`
+	IsLifetime bool   `json:"is_lifetime"`
 }
 
 func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request, uid int64) {
@@ -442,16 +443,16 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request, uid 
 	state, expYmd, life := subscription.RowToAPIState(sub, time.Now().UTC())
 	writeJSON(w, http.StatusOK, subscriptionResp{
 		State:      state,
-		ExpiresAt: expYmd,
+		ExpiresAt:  expYmd,
 		IsLifetime: life,
 	})
 }
 
 type webdavResp struct {
-	BaseURL   string `json:"base_url"`
-	Username  string `json:"username"`
-	Password  string `json:"password"`
-	NotesDir  string `json:"notes_dir"`
+	BaseURL  string `json:"base_url"`
+	Username string `json:"username"`
+	Password string `json:"password"`
+	NotesDir string `json:"notes_dir"`
 }
 
 func (s *Server) handleQingyuWebDAV(w http.ResponseWriter, r *http.Request, uid int64) {
@@ -530,14 +531,14 @@ func (s *Server) handleCreateOrder(w http.ResponseWriter, r *http.Request, uid i
 }
 
 type prepayResp struct {
-	AppID       string `json:"app_id"`
-	PartnerID   string `json:"partner_id"`
-	PrepayID    string `json:"prepay_id"`
-	Package     string `json:"package"`
-	NonceStr    string `json:"nonce_str"`
-	TimeStamp   string `json:"timestamp"`
-	Sign        string `json:"sign"`
-	SignType    string `json:"sign_type"`
+	AppID     string `json:"app_id"`
+	PartnerID string `json:"partner_id"`
+	PrepayID  string `json:"prepay_id"`
+	Package   string `json:"package"`
+	NonceStr  string `json:"nonce_str"`
+	TimeStamp string `json:"timestamp"`
+	Sign      string `json:"sign"`
+	SignType  string `json:"sign_type"`
 }
 
 func (s *Server) handleWeChatPrepay(w http.ResponseWriter, r *http.Request, uid int64) {

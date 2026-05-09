@@ -19,6 +19,7 @@
 | Apple | `internal/appleid/verify.go` | `identity_token` ES256 + JWKS |
 | 微信支付 | `internal/wxpay/appsign.go` 等 | APP 调起签名；回调验签见 `internal/wxnotify` |
 | 轻羽限流 | `internal/api/qingyu_guard.go` | `GET /qingyu/webdav` 每分钟限流 + 45s 缓存 |
+| 用户头像 | `internal/api/avatar_handlers.go`、`internal/avatarwebdav/put.go` | `POST /me/avatar`：multipart 上传后经 WebDAV 写入 NAS，CDN URL 写入 `avatar_url` |
 
 进程内**无** Redis；会话仅靠 JWT。
 
@@ -94,7 +95,34 @@
 - `expires_at`：到期日 `YYYY-MM-DD`（`lifetime` 时可能为空）  
 - `is_lifetime`：bool  
 
-### 2.6 轻羽云 WebDAV 下发
+### 2.6 个人信息（资料）
+
+| 方法 | 路径 | 鉴权 |
+|------|------|------|
+| GET | `/api/v1/me/profile` | Bearer |
+| PATCH | `/api/v1/me/profile` | Bearer |
+
+**GET 200**：用户资料 JSON；字段含 `username`、`avatar_url`、`huawei_linked`、`wechat_linked`、`apple_linked`、`membership_level`、`membership_expires_at`、`membership_is_lifetime`、`registered_at`、`phone`、`email`、`password_set`、`qingyu_subscription_active` 等（与 `internal/api/profile_handlers.go` 中 `profileWire` 一致）。
+
+**PATCH**：`Content-Type: application/json`，仅发送需要修改的字段，例如 `username`、`avatar_url`、`phone`、`email`，以及密码相关 `old_password` / `new_password` / `clear_password`。成功：`{"ok":true}`。
+
+### 2.7 用户头像上传
+
+| 方法 | 路径 | 鉴权 |
+|------|------|------|
+| POST | `/api/v1/me/avatar` | Bearer |
+
+**请求**：`Content-Type: multipart/form-data`，字段名 **`file`**（图片二进制）。客户端任选 JPG / PNG / GIF / WebP；服务端按**文件魔数**校验类型，大小上限 **5 MiB**。
+
+**前置条件**：环境变量 **`AVATAR_WEBDAV_BASE_URL`、`AVATAR_WEBDAV_USERNAME`、`AVATAR_WEBDAV_PASSWORD`** 均已配置（缺省时 **503**，`{"error":"avatar_webdav_not_configured"}`）。仓库默认 `AVATAR_WEBDAV_BASE_URL` 指向 NAS WebDAV 目录、`AVATAR_PUBLIC_BASE_URL` 为对外 CDN 前缀（见 `internal/config/config.go` 与 `.env.example`）。
+
+**行为简述**：生成文件名 `{user_id}_{32位hex}{.jpg|.png|.gif|.webp}`，使用 **HTTP PUT + Basic Auth** 上传到 WebDAV（`internal/avatarwebdav`）；将 **`AVATAR_PUBLIC_BASE_URL` + `/` + 文件名** 写入 `users.avatar_url`。
+
+**200 响应**：`{"avatar_url":"<完整 CDN URL>"}`。
+
+**常见错误**（JSON `error` 字段）：`invalid_multipart`、`file_required`、`empty_file`、`invalid_image_type`、`file_too_large`（413）、`avatar_upload_failed`（502，WebDAV 失败）、`db_failed`。
+
+### 2.8 轻羽云 WebDAV 下发
 
 | 方法 | 路径 | 鉴权 |
 |------|------|------|
@@ -106,7 +134,7 @@
 
 **常见错误**：403 `subscription_required`；503 `qingyu_webdav_not_configured`；429 限流（带 `Retry-After`）。
 
-### 2.7 订单与微信支付
+### 2.9 订单与微信支付
 
 | 方法 | 路径 | 鉴权 | 说明 |
 |------|------|------|------|
@@ -124,7 +152,7 @@
 
 Prepay 200：`app_id`、`partner_id`、`prepay_id`、`package`、`nonce_str`、`timestamp`、`sign`、`sign_type`。
 
-### 2.8 微信支付异步通知（服务端对微信）
+### 2.10 微信支付异步通知（服务端对微信）
 
 | 方法 | 路径 | 鉴权 |
 |------|------|------|
@@ -206,6 +234,7 @@ Prepay 200：`app_id`、`partner_id`、`prepay_id`、`package`、`nonce_str`、`
 | `EnsureUserForIdentity` | identities.go | 无则创建用户+身份 |
 | `LinkIdentity` | identities.go | 绑定身份；冲突返回 `ErrIdentityLinkedOtherUser` |
 | `MergeUserAbsorb` | merge.go | 合并两用户（订阅/订单/身份/删源用户） |
+| `PatchUserProfile` | profile.go | 更新 `display_name`、`avatar_url`、`phone`、`email` 等 |
 | `QingyuNotesDirForAuthenticatedUser` | mysql.go | 生成 NAS 目录 `/{id}/` |
 
 ---
@@ -221,6 +250,8 @@ Prepay 200：`app_id`、`partner_id`、`prepay_id`、`package`、`nonce_str`、`
 | `HUAWEI_CLIENT_ID` / `HUAWEI_CLIENT_SECRET` / `HUAWEI_REDIRECT_URI` | 华为 OAuth |
 | `APPLE_CLIENT_ID` | Sign in with Apple 的 `aud` |
 | `QINGYU_WEBDAV_BASE_URL` / `USERNAME` / `PASSWORD` | 轻羽 NAS 下发 |
+| `AVATAR_WEBDAV_BASE_URL` / `AVATAR_WEBDAV_USERNAME` / `AVATAR_WEBDAV_PASSWORD` | 用户头像：WebDAV 上传目标（三项齐全才启用 `POST /api/v1/me/avatar`） |
+| `AVATAR_PUBLIC_BASE_URL` | 头像对外访问 URL 前缀（与 CDN 一致，不含末尾 `/`；默认见 `config.go`） |
 | `PUBLIC_BASE_URL` | 回调域名前缀 |
 | `WECHAT_PAY_*` | 商户号、序列号、私钥路径、APIv3 Key |
 | `WECHAT_PAY_PLATFORM_CERT_PEM_PATH` | 微信平台证书 PEM（回调验签） |

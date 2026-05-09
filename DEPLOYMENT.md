@@ -61,7 +61,7 @@
    - 一键：`sudo ./scripts/deploy.sh migrate`（按 `deploy.local.env` 连接数据库，顺序执行 `001`～`003`）。
    - `001`、`002` 本身具备幂等或可重复特性；**`003_user_profile.sql` 通过检测列是否已存在跳过重复 `ALTER`**，已在运行且库里已有数据的实例也可安全执行（重复执行不会报错）。
    - 若你只上线过旧二进制、从未执行过 `003`，发布含「个人信息」的版本前**必须先跑完 `003`**，再重启服务，否则读写资料相关接口会缺列。
-3. **若环境变量有新增项**：更新 `/etc/noteapi.env`（个人信息功能沿用现有 `MYSQL_DSN` / `JWT_SECRET` 等，按 `.env.example` 核对是否有新增键）。
+3. **若环境变量有新增项**：更新 `/etc/noteapi.env`（按 `server/.env.example` 逐项核对；例如用户头像依赖 **`AVATAR_WEBDAV_*`** 与 **`AVATAR_PUBLIC_BASE_URL`**，详见 `TECHNICAL.md` §2.7）。
 4. **重新编译并重启服务**（或使用脚本）：
    ```bash
    cd /path/to/note/server

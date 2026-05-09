@@ -102,7 +102,7 @@ cmd_first_time() {
 
   log ""
   log "后续手工步骤："
-  log "  1) 编辑 ${ENV_FILE}（至少 MYSQL_DSN、JWT_SECRET、业务密钥）"
+  log "  1) 编辑 ${ENV_FILE}（至少 MYSQL_DSN、JWT_SECRET、业务密钥；头像上传需 AVATAR_WEBDAV_USERNAME/PASSWORD，见 .env.example）"
   log "  2) MySQL 执行迁移（已有数据的升级步骤见 DEPLOYMENT.md）:"
   log "       mysql ... < ${SERVER_ROOT}/migrations/001_init.sql"
   log "       mysql ... < ${SERVER_ROOT}/migrations/002_user_identities.sql"

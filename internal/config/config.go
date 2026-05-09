@@ -30,6 +30,12 @@ type Config struct {
 	QingyuWebDAVUsername string
 	QingyuWebDAVPassword string
 
+	// 用户头像：上传到 NAS WebDAV；对外 CDN URL 写入 users.avatar_url。
+	AvatarWebDAVBaseURL  string
+	AvatarWebDAVUsername string
+	AvatarWebDAVPassword string
+	AvatarPublicBaseURL  string
+
 	PublicBaseURL string
 
 	WechatPayMchID          string
@@ -70,6 +76,11 @@ func Load() *Config {
 		QingyuWebDAVUsername: getenv("QINGYU_WEBDAV_USERNAME", ""),
 		QingyuWebDAVPassword: getenv("QINGYU_WEBDAV_PASSWORD", ""),
 
+		AvatarWebDAVBaseURL:  getenv("AVATAR_WEBDAV_BASE_URL", "https://nas.therouter.cn:5006/cdn/note-avatar"),
+		AvatarWebDAVUsername: getenv("AVATAR_WEBDAV_USERNAME", ""),
+		AvatarWebDAVPassword: getenv("AVATAR_WEBDAV_PASSWORD", ""),
+		AvatarPublicBaseURL:  strings.TrimRight(getenv("AVATAR_PUBLIC_BASE_URL", "http://cdn.kymjs.com:8843/note-avatar"), "/"),
+
 		PublicBaseURL: strings.TrimRight(getenv("PUBLIC_BASE_URL", "https://noteapi.kymjs.com"), "/"),
 
 		WechatPayMchID:          getenv("WECHAT_PAY_MCH_ID", ""),
@@ -86,6 +97,9 @@ func Load() *Config {
 	if !c.QingyuWebDAVConfigured() {
 		log.Printf("warning: QINGYU_WEBDAV_BASE_URL / USERNAME / PASSWORD unset — light-cloud WebDAV endpoint returns 503 until set")
 	}
+	if !c.AvatarWebDAVConfigured() {
+		log.Printf("warning: AVATAR_WEBDAV_USERNAME / PASSWORD unset — avatar upload returns 503 until set")
+	}
 	return c
 }
 
@@ -101,6 +115,13 @@ func (c *Config) QingyuWebDAVConfigured() bool {
 	return strings.TrimSpace(c.QingyuWebDAVBaseURL) != "" &&
 		strings.TrimSpace(c.QingyuWebDAVUsername) != "" &&
 		strings.TrimSpace(c.QingyuWebDAVPassword) != ""
+}
+
+// AvatarWebDAVConfigured 为 true 时允许 POST /api/v1/me/avatar。
+func (c *Config) AvatarWebDAVConfigured() bool {
+	return strings.TrimSpace(c.AvatarWebDAVBaseURL) != "" &&
+		strings.TrimSpace(c.AvatarWebDAVUsername) != "" &&
+		strings.TrimSpace(c.AvatarWebDAVPassword) != ""
 }
 
 func (c *Config) HuaweiOAuthConfigured() bool {
