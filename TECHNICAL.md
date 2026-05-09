@@ -120,7 +120,9 @@
 
 **200 响应**：`{"avatar_url":"<完整 CDN URL>"}`。
 
-**常见错误**（JSON `error` 字段）：`invalid_multipart`、`file_required`、`empty_file`、`invalid_image_type`、`file_too_large`（413）、`avatar_upload_failed`（502，WebDAV 失败）、`db_failed`。
+**常见错误**（JSON `error` 字段）：`invalid_multipart`、`file_required`、`empty_file`、`invalid_image_type`、`file_too_large`（413，**服务端**校验）、`avatar_upload_failed`（502，WebDAV 失败）、`db_failed`。
+
+若前面有 **Nginx** 等反代且未调大 `client_max_body_size`，请求可能在到达本服务前即返回 **413**（正文常为 HTML），见 `DEPLOYMENT.md` 反向代理说明。
 
 ### 2.8 轻羽云 WebDAV 下发
 
