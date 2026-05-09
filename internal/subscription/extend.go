@@ -3,13 +3,17 @@ package subscription
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/kymjs/noteapi/internal/config"
 	"github.com/kymjs/noteapi/internal/store"
 )
 
-const lifetimeYear = 2099
+// LifetimeYearUTC 与微信支付终身路径一致：expires_at 锚定年末。
+const LifetimeYearUTC = 2099
+
+const lifetimeYear = LifetimeYearUTC
 
 // ExtendAfterPayment 与客户端「未过期则顺延、已过期则从今日起算」一致；按自然月递增。
 func ExtendAfterPayment(sub *store.SubscriptionRow, plan string, nowUTC time.Time) (newExpiry time.Time, lifetime bool) {
@@ -67,4 +71,14 @@ func RowToAPIState(sub *store.SubscriptionRow, nowUTC time.Time) (state string, 
 
 func NullableDate(t time.Time) sql.NullTime {
 	return sql.NullTime{Time: t, Valid: true}
+}
+
+// ApplyRedemptionPlan 与订单套餐 ID 对齐；lifetime_vip 单独设为终身。
+func ApplyRedemptionPlan(sub *store.SubscriptionRow, plan string, nowUTC time.Time) (newExpiry time.Time, lifetime bool) {
+	switch strings.TrimSpace(plan) {
+	case "lifetime_vip":
+		return time.Date(LifetimeYearUTC, 12, 31, 0, 0, 0, 0, time.UTC), true
+	default:
+		return ExtendAfterPayment(sub, plan, nowUTC)
+	}
 }
