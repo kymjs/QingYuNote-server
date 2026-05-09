@@ -42,10 +42,15 @@ func QingyuNotesDirForAuthenticatedUser(userID int64) string {
 }
 
 type User struct {
-	ID         int64
-	FolderKey  string
-	WechatOID  sql.NullString
-	CreatedAt  time.Time
+	ID           int64
+	FolderKey    string
+	WechatOID    sql.NullString
+	CreatedAt    time.Time
+	DisplayName  sql.NullString
+	AvatarURL    sql.NullString
+	Phone        sql.NullString
+	Email        sql.NullString
+	PasswordHash sql.NullString
 }
 
 func (s *Store) UpsertUserByWechat(ctx context.Context, openID string) (*User, error) {
@@ -54,8 +59,13 @@ func (s *Store) UpsertUserByWechat(ctx context.Context, openID string) (*User, e
 
 func (s *Store) GetUserByWechatOpenID(ctx context.Context, openID string) (*User, error) {
 	var u User
-	q := `SELECT id, folder_key, wechat_openid, created_at FROM users WHERE wechat_openid = ? LIMIT 1`
-	err := s.DB.QueryRowContext(ctx, q, openID).Scan(&u.ID, &u.FolderKey, &u.WechatOID, &u.CreatedAt)
+	q := `SELECT id, folder_key, wechat_openid, created_at,
+		display_name, avatar_url, phone, email, password_hash
+		FROM users WHERE wechat_openid = ? LIMIT 1`
+	err := s.DB.QueryRowContext(ctx, q, openID).Scan(
+		&u.ID, &u.FolderKey, &u.WechatOID, &u.CreatedAt,
+		&u.DisplayName, &u.AvatarURL, &u.Phone, &u.Email, &u.PasswordHash,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -64,8 +74,13 @@ func (s *Store) GetUserByWechatOpenID(ctx context.Context, openID string) (*User
 
 func (s *Store) GetUserByID(ctx context.Context, id int64) (*User, error) {
 	var u User
-	q := `SELECT id, folder_key, wechat_openid, created_at FROM users WHERE id = ? LIMIT 1`
-	err := s.DB.QueryRowContext(ctx, q, id).Scan(&u.ID, &u.FolderKey, &u.WechatOID, &u.CreatedAt)
+	q := `SELECT id, folder_key, wechat_openid, created_at,
+		display_name, avatar_url, phone, email, password_hash
+		FROM users WHERE id = ? LIMIT 1`
+	err := s.DB.QueryRowContext(ctx, q, id).Scan(
+		&u.ID, &u.FolderKey, &u.WechatOID, &u.CreatedAt,
+		&u.DisplayName, &u.AvatarURL, &u.Phone, &u.Email, &u.PasswordHash,
+	)
 	if err != nil {
 		return nil, err
 	}

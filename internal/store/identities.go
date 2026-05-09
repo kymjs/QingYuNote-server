@@ -144,3 +144,30 @@ func normalizeProv(p string) string {
 		return ""
 	}
 }
+
+// IdentityBindings 返回当前用户是否已绑定各第三方登录。
+func (s *Store) IdentityBindings(ctx context.Context, userID int64) (wechat, huawei, apple bool, err error) {
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT DISTINCT provider FROM user_identities WHERE user_id = ?`,
+		userID,
+	)
+	if err != nil {
+		return false, false, false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return false, false, false, err
+		}
+		switch normalizeProv(p) {
+		case ProviderWechat:
+			wechat = true
+		case ProviderHuawei:
+			huawei = true
+		case ProviderApple:
+			apple = true
+		}
+	}
+	return wechat, huawei, apple, rows.Err()
+}
