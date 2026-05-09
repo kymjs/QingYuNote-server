@@ -62,7 +62,7 @@
 
 1. 拉取最新代码（或上传新压缩包解压）。
 2. **若有新的 SQL 迁移**：在维护窗口先备份数据库（见下文「回滚」），再执行迁移，最后再起新版本二进制。
-   - 一键：`sudo ./scripts/deploy.sh migrate`（按 `deploy.local.env` 连接数据库，顺序执行 `001`～`003`）。
+   - 一键：`sudo ./scripts/deploy.sh migrate`（按 `deploy.local.env` 连接数据库，顺序执行 `001`～`004`，含兑换码表）。
    - `001`、`002` 本身具备幂等或可重复特性；**`003_user_profile.sql` 通过检测列是否已存在跳过重复 `ALTER`**，已在运行且库里已有数据的实例也可安全执行（重复执行不会报错）。
    - 若你只上线过旧二进制、从未执行过 `003`，发布含「个人信息」的版本前**必须先跑完 `003`**，再重启服务，否则读写资料相关接口会缺列。
 3. **若环境变量有新增项**：更新 `/etc/noteapi.env`（按 `server/.env.example` 逐项核对；例如用户头像依赖 **`AVATAR_WEBDAV_*`** 与 **`AVATAR_PUBLIC_BASE_URL`**，详见 `TECHNICAL.md` §2.7）。
@@ -75,6 +75,8 @@
 5. **验证**：`curl -fsS https://你的域名/healthz` 应返回 `ok`；按需调用登录与个人资料相关接口做冒烟测试。
 
 **推荐上线顺序（服务端已在跑、库里有数据）**：`mysqldump` 备份 → `sudo ./scripts/deploy.sh migrate` → `sudo ./scripts/deploy.sh update`。
+
+**`update` 行为摘要**：覆盖二进制前默认将旧版备份为 `${DEPLOY_ROOT}/bin/noteapi.prev`（可用 `BACKUP_BIN_ON_UPDATE=0` 关闭）；重启后会检查 systemd 是否为 `active`，失败则打印最近日志并退出非零。可选在 `deploy.local.env` 设置 `NOTEAPI_HEALTH_URL=http://127.0.0.1:9443/healthz`（与 `LISTEN_ADDR` 一致），以便脚本用 `curl` 做一次 `/healthz` 冒烟。
 
 ---
 
@@ -93,7 +95,7 @@ nano scripts/deploy.local.env   # 填写 MYSQL_HOST / MYSQL_USER / MYSQL_PASSWOR
 **`deploy.sh` 子命令**：
 
 - `first-time`：安装常用依赖、创建部署目录、编译、安装 systemd（需 root）。
-- `migrate`：按 `deploy.local.env` 中的 **`MYSQL_*`** 顺序执行 `migrations/001`、`002`、`003`（需本机已安装 `mysql-client`）。
+- `migrate`：按 `deploy.local.env` 中的 **`MYSQL_*`** 顺序执行 `migrations/001`～`004`（需本机已安装 `mysql-client`）。
 - `update`：`git pull`（可选）、编译、重启 `noteapi`（需 root）。
 
 仍可通过环境变量覆盖 **`DEPLOY_ROOT`**、**`ENV_FILE`** 等。
@@ -138,7 +140,9 @@ sudo -E ./scripts/deploy.sh first-time
 ## 6. 回滚建议
 
 - 部署前备份：`mysqldump` 业务库。
-- 二进制保留上一份：`cp noteapi noteapi.bak` 再覆盖；异常时 `systemctl stop noteapi && cp noteapi.bak noteapi && systemctl start noteapi`。
+- 二进制：`deploy.sh update` 默认在覆盖前生成 **`${DEPLOY_ROOT}/bin/noteapi.prev`**；异常时可  
+  `sudo systemctl stop noteapi && sudo cp -a "${DEPLOY_ROOT}/bin/noteapi.prev" "${DEPLOY_ROOT}/bin/noteapi" && sudo systemctl start noteapi`（路径按实际 `DEPLOY_ROOT` 调整）。
+- 亦可手工：`cp noteapi noteapi.bak` 再覆盖；异常时还原后再 `systemctl start`。
 
 ---
 

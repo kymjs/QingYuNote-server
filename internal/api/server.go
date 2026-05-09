@@ -463,8 +463,21 @@ func (s *Server) handleQingyuWebDAV(w http.ResponseWriter, r *http.Request, uid 
 		return
 	}
 	if cached, ok := s.qingyuGuard.getCached(uid, now); ok {
-		writeJSON(w, http.StatusOK, cached)
-		return
+		ctx := r.Context()
+		sub, err := s.Store.GetSubscription(ctx, uid)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
+			return
+		}
+		if errors.Is(err, sql.ErrNoRows) {
+			sub = nil
+		}
+		state, _, _ := subscription.RowToAPIState(sub, time.Now().UTC())
+		if state == "active" || state == "lifetime" {
+			writeJSON(w, http.StatusOK, cached)
+			return
+		}
+		s.qingyuGuard.invalidate(uid)
 	}
 
 	ctx := r.Context()
@@ -695,6 +708,7 @@ func (s *Server) handleWeChatPayNotify(w http.ResponseWriter, r *http.Request) {
 	} else {
 		_ = s.Store.UpsertSubscriptionExpiry(ctx, dbo.UserID, newExp, false)
 	}
+	s.qingyuGuard.invalidate(dbo.UserID)
 	writeJSON(w, http.StatusOK, map[string]string{"code": "SUCCESS", "message": "OK"})
 }
 

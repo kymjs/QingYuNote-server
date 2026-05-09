@@ -69,6 +69,13 @@ func (g *qingyuWebDAVGuard) setCached(uid int64, resp webdavResp, now time.Time)
 	g.cache[uid] = qingyuWebDAVCacheEntry{resp: resp, until: now.Add(qingyuWebDAVCacheTTL)}
 }
 
+// invalidate 在订阅变更（兑换、支付等）后调用，避免客户端仍拿到旧缓存语义。
+func (g *qingyuWebDAVGuard) invalidate(uid int64) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	delete(g.cache, uid)
+}
+
 func writeTooManyRequests(w http.ResponseWriter) {
 	w.Header().Set("Retry-After", "30")
 	writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "rate_limited"})

@@ -33,6 +33,10 @@ SERVICE_NAME="${SERVICE_NAME:-noteapi}"
 GIT_REMOTE_PULL="${GIT_REMOTE_PULL:-1}"
 # update 时若为 1，则在编译前自动执行 migrate（需在 deploy.local.env 配置 MYSQL_*）
 RUN_MIGRATE_ON_UPDATE="${RUN_MIGRATE_ON_UPDATE:-0}"
+# update 时若为 1，在覆盖二进制前将现有 noteapi 复制为 ${BIN_PATH}.prev（便于快速回滚）
+BACKUP_BIN_ON_UPDATE="${BACKUP_BIN_ON_UPDATE:-1}"
+# 若设置（如 http://127.0.0.1:9443/healthz），update 在重启成功后会 curl 做一次冒烟（需本机可访问监听地址）
+NOTEAPI_HEALTH_URL="${NOTEAPI_HEALTH_URL:-}"
 
 MYSQL_HOST="${MYSQL_HOST:-127.0.0.1}"
 MYSQL_PORT="${MYSQL_PORT:-3306}"
@@ -136,9 +140,29 @@ cmd_update() {
     log "RUN_MIGRATE_ON_UPDATE=1：执行数据库迁移（001 … 004）"
     cmd_migrate
   fi
+  if [[ "${BACKUP_BIN_ON_UPDATE}" == "1" ]] && [[ -f "${BIN_PATH}" ]]; then
+    log "备份现有二进制: ${BIN_PATH} -> ${BIN_PATH}.prev"
+    cp -a "${BIN_PATH}" "${BIN_PATH}.prev"
+  fi
   build_binary
   systemctl restart "${SERVICE_NAME}.service"
-  log "已重启 ${SERVICE_NAME}"
+  sleep 0.5
+  if ! systemctl is-active --quiet "${SERVICE_NAME}.service"; then
+    log "最近日志（${SERVICE_NAME}）："
+    journalctl -u "${SERVICE_NAME}.service" -n 30 --no-pager 2>/dev/null || true
+    die "${SERVICE_NAME} 未能进入 active，请检查配置与日志"
+  fi
+  log "已重启 ${SERVICE_NAME}（active）"
+  if [[ -n "${NOTEAPI_HEALTH_URL}" ]]; then
+    if command -v curl >/dev/null 2>&1; then
+      log "健康检查: curl -fsS ${NOTEAPI_HEALTH_URL}"
+      curl -fsS --connect-timeout 3 --max-time 10 "${NOTEAPI_HEALTH_URL}" >/dev/null \
+        && log "health 检查通过" \
+        || log "health 检查失败（服务已 active，请确认 LISTEN_ADDR / 反代；可忽略或修正 NOTEAPI_HEALTH_URL）"
+    else
+      log "未安装 curl，跳过 NOTEAPI_HEALTH_URL 检查"
+    fi
+  fi
   systemctl --no-pager -l status "${SERVICE_NAME}.service" || true
 }
 
@@ -191,6 +215,8 @@ usage() {
   SERVICE_NAME=${SERVICE_NAME}
   GIT_REMOTE_PULL=${GIT_REMOTE_PULL}   # update 时是否 git pull，设为 0 可跳过
   RUN_MIGRATE_ON_UPDATE=${RUN_MIGRATE_ON_UPDATE}   # 设为 1 时 update 会先执行 migrate（须已配置 MYSQL_*）
+  BACKUP_BIN_ON_UPDATE=${BACKUP_BIN_ON_UPDATE}     # 设为 0 可跳过编译前备份为 .prev
+  NOTEAPI_HEALTH_URL   # 例如 http://127.0.0.1:9443/healthz；设置后 update 重启成功会 curl 冒烟
 
 示例:
   sudo DEPLOY_ROOT=/opt/noteapi ./scripts/deploy.sh first-time

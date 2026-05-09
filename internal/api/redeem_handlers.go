@@ -48,5 +48,6 @@ func (s *Server) handleRedeem(w http.ResponseWriter, r *http.Request, uid int64)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
 		return
 	}
+	s.qingyuGuard.invalidate(uid)
 	writeJSON(w, http.StatusOK, redeemResp{PlanID: plan})
 }
