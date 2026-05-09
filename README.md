@@ -18,11 +18,12 @@ export QINGYU_WEBDAV_PASSWORD='…'
 export PUBLIC_BASE_URL='https://noteapi.kymjs.com'
 ```
 
-导入表结构（新环境执行 `001` 后执行 `002`；已有库追加执行 `002` 即可）：
+导入表结构（新环境按顺序执行 `001`～`003`；已有库只补尚未执行过的文件，`003` 可重复执行）：
 
 ```bash
 mysql "$MYSQL_DSN" < migrations/001_init.sql
 mysql "$MYSQL_DSN" < migrations/002_user_identities.sql
+mysql "$MYSQL_DSN" < migrations/003_user_profile.sql
 ```
 
 多登录方式（微信 / 华为 / Apple）共用一个 `users` 行，绑定关系在表 `user_identities`；首次升级会按历史 `wechat_openid` 回填微信身份。

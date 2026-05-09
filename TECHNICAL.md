@@ -136,7 +136,7 @@ Prepay 200：`app_id`、`partner_id`、`prepay_id`、`package`、`nonce_str`、`
 
 ## 3. 数据库表与字段
 
-脚本位置：`migrations/001_init.sql`、`migrations/002_user_identities.sql`。
+脚本位置：`migrations/001_init.sql`、`migrations/002_user_identities.sql`、`migrations/003_user_profile.sql`（资料列）。
 
 ### 3.1 `users`
 
@@ -145,6 +145,11 @@ Prepay 200：`app_id`、`partner_id`、`prepay_id`、`package`、`nonce_str`、`
 | id | BIGINT PK AI | 用户主键，JWT `sub` |
 | folder_key | VARCHAR(128) | 历史/兼容目录键；新建用户多为 `u{id}` |
 | wechat_openid | VARCHAR(64) NULL UNIQUE | 兼容列；多身份以 `user_identities` 为准 |
+| display_name | VARCHAR(191) NULL | 用户资料（`003`） |
+| avatar_url | VARCHAR(512) NULL | 头像 URL |
+| phone | VARCHAR(32) NULL | 手机号 |
+| email | VARCHAR(191) NULL | 邮箱 |
+| password_hash | VARCHAR(255) NULL | bcrypt，仅存哈希 |
 | created_at / updated_at | DATETIME(3) | — |
 
 ### 3.2 `user_identities`

@@ -103,9 +103,10 @@ cmd_first_time() {
   log ""
   log "后续手工步骤："
   log "  1) 编辑 ${ENV_FILE}（至少 MYSQL_DSN、JWT_SECRET、业务密钥）"
-  log "  2) MySQL 执行迁移:"
+  log "  2) MySQL 执行迁移（已有数据的升级步骤见 DEPLOYMENT.md）:"
   log "       mysql ... < ${SERVER_ROOT}/migrations/001_init.sql"
   log "       mysql ... < ${SERVER_ROOT}/migrations/002_user_identities.sql"
+  log "       mysql ... < ${SERVER_ROOT}/migrations/003_user_profile.sql"
   log "  3) systemctl start ${SERVICE_NAME} && systemctl status ${SERVICE_NAME}"
   log "  4) 配置 Nginx/Caddy 反代到 LISTEN_ADDR（默认 :9443）"
   log ""
@@ -150,8 +151,9 @@ cmd_migrate() {
   }
   run_sql "${SERVER_ROOT}/migrations/001_init.sql"
   run_sql "${SERVER_ROOT}/migrations/002_user_identities.sql"
+  run_sql "${SERVER_ROOT}/migrations/003_user_profile.sql"
   unset MYSQL_PWD
-  log "迁移完成（001 + 002）"
+  log "迁移完成（001 + 002 + 003，含用户资料列；003 可重复执行）"
 }
 
 usage() {
@@ -162,7 +164,7 @@ usage() {
   first-time   首次安装依赖、编译、安装 systemd（需 root）
   update       git pull（若存在 .git）、编译、重启服务（需 root）
   build-only   仅编译到 \${DEPLOY_ROOT}/bin/\${BIN_NAME}（默认不需 root）
-  migrate      按 deploy.local.env 中的 MYSQL_* 执行 migrations/001、002（需 root；需 mysql 客户端）
+  migrate      按 deploy.local.env 中的 MYSQL_* 执行 migrations/001、002、003（需 root；需 mysql 客户端；003 对已有库可重复执行）
 
 机密配置（勿提交 Git）:
   复制 scripts/deploy.local.env.example -> scripts/deploy.local.env 并填写

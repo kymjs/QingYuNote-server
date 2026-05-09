@@ -45,6 +45,7 @@
 3. **执行迁移**（按顺序）：
    - `migrations/001_init.sql`
    - `migrations/002_user_identities.sql`
+   - `migrations/003_user_profile.sql`（用户资料列；与其它迁移一样可通过 `deploy.sh migrate` 执行）
 4. **配置环境变量**：复制 `server/.env.example` 为机器上的机密文件（例如 `/etc/noteapi.env`），填写 `MYSQL_DSN`、`JWT_SECRET`、各业务变量。
 5. **编译**：在 `server` 目录执行 `go build -o /usr/local/bin/noteapi ./cmd/noteapi`（路径可自定）。
 6. **systemd**：使用 `scripts/noteapi.service` 模板，把 `EnvironmentFile` 指向上面的 env 文件，`ExecStart` 指向二进制与监听地址。
@@ -56,15 +57,20 @@
 ## 3. 代码更新后如何处理
 
 1. 拉取最新代码（或上传新压缩包解压）。
-2. **若有新的 SQL 迁移**：在维护窗口执行新迁移文件（当前仓库仅 `001`、`002`；以后若有 `003_xxx.sql` 需按发布说明执行）。
-3. **若环境变量有新增项**：更新 `/etc/noteapi.env`。
-4. **重新编译并重启服务**：
+2. **若有新的 SQL 迁移**：在维护窗口先备份数据库（见下文「回滚」），再执行迁移，最后再起新版本二进制。
+   - 一键：`sudo ./scripts/deploy.sh migrate`（按 `deploy.local.env` 连接数据库，顺序执行 `001`～`003`）。
+   - `001`、`002` 本身具备幂等或可重复特性；**`003_user_profile.sql` 通过检测列是否已存在跳过重复 `ALTER`**，已在运行且库里已有数据的实例也可安全执行（重复执行不会报错）。
+   - 若你只上线过旧二进制、从未执行过 `003`，发布含「个人信息」的版本前**必须先跑完 `003`**，再重启服务，否则读写资料相关接口会缺列。
+3. **若环境变量有新增项**：更新 `/etc/noteapi.env`（个人信息功能沿用现有 `MYSQL_DSN` / `JWT_SECRET` 等，按 `.env.example` 核对是否有新增键）。
+4. **重新编译并重启服务**（或使用脚本）：
    ```bash
    cd /path/to/note/server
-   go build -o /usr/local/bin/noteapi ./cmd/noteapi
-   sudo systemctl restart noteapi
+   sudo ./scripts/deploy.sh update
    ```
-5. **验证**：`curl -fsS https://你的域名/healthz` 应返回 `ok`。
+   等价手工步骤：`go build ...` 后 `sudo systemctl restart noteapi`。
+5. **验证**：`curl -fsS https://你的域名/healthz` 应返回 `ok`；按需调用登录与个人资料相关接口做冒烟测试。
+
+**推荐上线顺序（服务端已在跑、库里有数据）**：`mysqldump` 备份 → `sudo ./scripts/deploy.sh migrate` → `sudo ./scripts/deploy.sh update`。
 
 ---
 
@@ -83,7 +89,7 @@ nano scripts/deploy.local.env   # 填写 MYSQL_HOST / MYSQL_USER / MYSQL_PASSWOR
 **`deploy.sh` 子命令**：
 
 - `first-time`：安装常用依赖、创建部署目录、编译、安装 systemd（需 root）。
-- `migrate`：按 `deploy.local.env` 中的 **`MYSQL_*`** 执行 `migrations/001`、`002`（需本机已安装 `mysql-client`）。
+- `migrate`：按 `deploy.local.env` 中的 **`MYSQL_*`** 顺序执行 `migrations/001`、`002`、`003`（需本机已安装 `mysql-client`）。
 - `update`：`git pull`（可选）、编译、重启 `noteapi`（需 root）。
 
 仍可通过环境变量覆盖 **`DEPLOY_ROOT`**、**`ENV_FILE`** 等。
