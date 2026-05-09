@@ -8,6 +8,9 @@
 #   3) /etc/noteapi.env（若可读；部署常用，普通用户无权限时需 sudo 执行本脚本）
 #
 # 默认使用国内模块代理（与 scripts/deploy.sh 一致）；可 export GOPROXY / GOSUMDB 覆盖。
+#
+# 环境文件不用 bash source：MYSQL_DSN 中含 tcp(...) 时未加引号会导致 syntax error；
+# 此处按 KEY=VALUE 逐行解析并用 printf %q 导出，与 systemd EnvironmentFile 常见写法兼容。
 set -euo pipefail
 
 # sudo 后 PATH 常不含官方 Go；与 deploy.sh 一致
@@ -22,23 +25,37 @@ cd "$ROOT"
 : "${GOSUMDB:=sum.golang.google.cn}"
 export GOPROXY GOSUMDB
 
-source_env_if_readable() {
+load_env_file_safe() {
   local path="$1"
   [[ -n "${path}" ]] || return 0
   [[ -f "${path}" ]] || return 0
-  if [[ ! -r "${path}" ]]; then
-    return 0
-  fi
-  set -a
-  # shellcheck disable=SC1090
-  source "${path}"
-  set +a
+  [[ -r "${path}" ]] || return 0
+
+  local line key val
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    line="${line%$'\r'}"
+    line="${line#"${line%%[![:space:]]*}"}"
+    [[ -z "${line}" || "${line}" =~ ^[[:space:]]*# ]] && continue
+    if [[ "${line}" =~ ^[[:space:]]*export[[:space:]]+(.+)$ ]]; then
+      line="${BASH_REMATCH[1]}"
+    fi
+    [[ "${line}" == *'='* ]] || continue
+    key="${line%%=*}"
+    val="${line#*=}"
+    [[ "${key}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    if [[ "${val}" =~ ^\'(.*)\'$ ]]; then
+      val="${BASH_REMATCH[1]}"
+    elif [[ "${val}" =~ ^\"(.*)\"$ ]]; then
+      val="${BASH_REMATCH[1]}"
+    fi
+    eval "$(printf 'export %s=%q' "${key}" "${val}")"
+  done < "${path}"
 }
 
 if [[ -n "${NOTEAPI_ENV_FILE:-}" ]]; then
-  source_env_if_readable "${NOTEAPI_ENV_FILE}"
+  load_env_file_safe "${NOTEAPI_ENV_FILE}"
 fi
-source_env_if_readable "${ROOT}/.env"
-source_env_if_readable "/etc/noteapi.env"
+load_env_file_safe "${ROOT}/.env"
+load_env_file_safe "/etc/noteapi.env"
 
 exec go run ./cmd/issue_redemption_codes "$@"
