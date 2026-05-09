@@ -144,31 +144,21 @@ type authWechatReq struct {
 }
 
 type authLoginResp struct {
-	AccessToken      string `json:"access_token"`
-	TokenType        string `json:"token_type"`
-	ExpiresIn        int64  `json:"expires_in"`
-	Provider         string `json:"provider"`
-	Subject          string `json:"subject"`
-	ThirdPartyUserID string `json:"third_party_user_id"`
-	OpenID           string `json:"openid,omitempty"`
+	AccessToken string `json:"access_token"`
+	ExpiresIn   int64  `json:"expires_in"`
+	UserID      int64  `json:"user_id"`
 }
 
-func (s *Server) issueAuthToken(w http.ResponseWriter, userID int64, provider, subject, thirdPartyPrefix string) bool {
+func (s *Server) issueAuthToken(w http.ResponseWriter, userID int64) bool {
 	tok, err := auth.SignAccessToken(userID, s.Cfg.JWTSecret, 7*24*time.Hour)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "token_failed"})
 		return false
 	}
 	resp := authLoginResp{
-		AccessToken:      tok,
-		TokenType:        "Bearer",
-		ExpiresIn:        int64((7 * 24 * time.Hour).Seconds()),
-		Provider:         provider,
-		Subject:          subject,
-		ThirdPartyUserID: thirdPartyPrefix + subject,
-	}
-	if provider == store.ProviderWechat {
-		resp.OpenID = subject
+		AccessToken: tok,
+		ExpiresIn:   int64((7 * 24 * time.Hour).Seconds()),
+		UserID:      userID,
 	}
 	writeJSON(w, http.StatusOK, resp)
 	return true
@@ -191,7 +181,7 @@ func (s *Server) handleAuthWechat(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
 		return
 	}
-	s.issueAuthToken(w, u.ID, store.ProviderWechat, o.OpenID, "wx")
+	s.issueAuthToken(w, u.ID)
 }
 
 type authHuaweiReq struct {
@@ -224,7 +214,7 @@ func (s *Server) handleAuthHuawei(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
 		return
 	}
-	s.issueAuthToken(w, u.ID, store.ProviderHuawei, sub, "hw")
+	s.issueAuthToken(w, u.ID)
 }
 
 type authAppleReq struct {
@@ -252,7 +242,7 @@ func (s *Server) handleAuthApple(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
 		return
 	}
-	s.issueAuthToken(w, u.ID, store.ProviderApple, sub, "ap")
+	s.issueAuthToken(w, u.ID)
 }
 
 type linkWechatReq struct {

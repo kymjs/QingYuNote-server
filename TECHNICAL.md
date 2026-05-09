@@ -42,7 +42,7 @@
 
 下列接口**无需** Bearer；成功后返回统一字段：
 
-`access_token`、`token_type`（`Bearer`）、`expires_in`（秒）、`provider`、`subject`、`third_party_user_id`（前缀：`wx`/`hw`/`ap`）；微信额外返回 `openid`。
+`access_token`、`expires_in`（秒）、`user_id`（`users.id`，JSON 数字）。
 
 | 方法 | 路径 | 请求体 | 说明 |
 |------|------|--------|------|
