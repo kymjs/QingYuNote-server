@@ -116,7 +116,12 @@ cmd_update() {
   log "=== 更新部署 ==="
   if [[ "${GIT_REMOTE_PULL}" == "1" ]] && [[ -d "${SERVER_ROOT}/.git" ]]; then
     log "git pull（SERVER_ROOT=${SERVER_ROOT}）"
-    (cd "${SERVER_ROOT}" && git pull --ff-only)
+    # sudo 下 root 使用 /root/.ssh，通常没有部署用户的密钥；改由发起 sudo 的用户执行 pull
+    if [[ -n "${SUDO_USER:-}" ]] && [[ "${SUDO_USER}" != root ]] && id "${SUDO_USER}" >/dev/null 2>&1; then
+      (cd "${SERVER_ROOT}" && sudo -u "${SUDO_USER}" -H git pull --ff-only)
+    else
+      (cd "${SERVER_ROOT}" && git pull --ff-only)
+    fi
   fi
   build_binary
   systemctl restart "${SERVICE_NAME}.service"
