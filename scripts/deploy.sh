@@ -26,9 +26,13 @@ fi
 DEPLOY_ROOT="${DEPLOY_ROOT:-/opt/noteapi}"
 BIN_NAME="${BIN_NAME:-noteapi}"
 BIN_PATH="${DEPLOY_ROOT}/bin/${BIN_NAME}"
+ISSUE_TOOL_NAME="${ISSUE_TOOL_NAME:-issue_redemption_codes}"
+ISSUE_TOOL_PATH="${DEPLOY_ROOT}/bin/${ISSUE_TOOL_NAME}"
 ENV_FILE="${ENV_FILE:-/etc/noteapi.env}"
 SERVICE_NAME="${SERVICE_NAME:-noteapi}"
 GIT_REMOTE_PULL="${GIT_REMOTE_PULL:-1}"
+# update 时若为 1，则在编译前自动执行 migrate（需在 deploy.local.env 配置 MYSQL_*）
+RUN_MIGRATE_ON_UPDATE="${RUN_MIGRATE_ON_UPDATE:-0}"
 
 MYSQL_HOST="${MYSQL_HOST:-127.0.0.1}"
 MYSQL_PORT="${MYSQL_PORT:-3306}"
@@ -60,10 +64,13 @@ ensure_go() {
 build_binary() {
   ensure_go
   mkdir -p "$(dirname "${BIN_PATH}")"
-  log "编译: ${SERVER_ROOT}/cmd/noteapi -> ${BIN_PATH}（GOPROXY=${GOPROXY}）"
+  mkdir -p "$(dirname "${ISSUE_TOOL_PATH}")"
+  log "编译 noteapi: ${SERVER_ROOT}/cmd/noteapi -> ${BIN_PATH}（GOPROXY=${GOPROXY}）"
   (cd "${SERVER_ROOT}" && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "${BIN_PATH}" ./cmd/noteapi)
-  chmod 755 "${BIN_PATH}"
-  log "编译完成"
+  log "编译兑换码签发工具: ./cmd/issue_redemption_codes -> ${ISSUE_TOOL_PATH}"
+  (cd "${SERVER_ROOT}" && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "${ISSUE_TOOL_PATH}" ./cmd/issue_redemption_codes)
+  chmod 755 "${BIN_PATH}" "${ISSUE_TOOL_PATH}"
+  log "编译完成（noteapi + ${ISSUE_TOOL_NAME}）"
 }
 
 install_systemd_unit() {
@@ -102,13 +109,14 @@ cmd_first_time() {
 
   log ""
   log "后续手工步骤："
-  log "  1) 编辑 ${ENV_FILE}（至少 MYSQL_DSN、JWT_SECRET、业务密钥；头像上传需 AVATAR_WEBDAV_USERNAME/PASSWORD，见 .env.example）"
-  log "  2) MySQL 执行迁移（已有数据的升级步骤见 DEPLOYMENT.md）:"
-  log "       mysql ... < ${SERVER_ROOT}/migrations/001_init.sql"
-  log "       mysql ... < ${SERVER_ROOT}/migrations/002_user_identities.sql"
-  log "       mysql ... < ${SERVER_ROOT}/migrations/003_user_profile.sql"
+  log "  1) 编辑 ${ENV_FILE}（至少 MYSQL_DSN、JWT_SECRET、业务密钥；头像上传需 AVATAR_WEBDAV_USERNAME/PASSWORD；兑换码签发需 REDEMPTION_ISSUE_SECRET、FEISHU_REDEMPTION_WEBHOOK_URL，见 .env.example）"
+  log "  2) MySQL 迁移（推荐在填写 scripts/deploy.local.env 的 MYSQL_* 后执行）:"
+  log "       sudo ${SCRIPT_DIR}/deploy.sh migrate"
+  log "     或手工: mysql ... < migrations/001_init.sql … 直至 004_redemption_codes.sql（详见 DEPLOYMENT.md）"
   log "  3) systemctl start ${SERVICE_NAME} && systemctl status ${SERVICE_NAME}"
   log "  4) 配置 Nginx/Caddy 反代到 LISTEN_ADDR（默认 :9443）"
+  log "  5) 签发兑换码（需在同一主机 source ${ENV_FILE} 或导出 MYSQL_DSN、REDEMPTION_ISSUE_SECRET）:"
+  log "       ${ISSUE_TOOL_PATH} -plan monthly -count 1 -issuer-secret \"\$REDEMPTION_ISSUE_SECRET\""
   log ""
 }
 
@@ -124,6 +132,10 @@ cmd_update() {
       (cd "${SERVER_ROOT}" && git pull --ff-only)
     fi
   fi
+  if [[ "${RUN_MIGRATE_ON_UPDATE}" == "1" ]]; then
+    log "RUN_MIGRATE_ON_UPDATE=1：执行数据库迁移（001 … 004）"
+    cmd_migrate
+  fi
   build_binary
   systemctl restart "${SERVICE_NAME}.service"
   log "已重启 ${SERVICE_NAME}"
@@ -133,8 +145,10 @@ cmd_update() {
 cmd_build_only() {
   log "=== 仅编译（不写 systemd）==="
   mkdir -p "$(dirname "${BIN_PATH}")"
+  mkdir -p "$(dirname "${ISSUE_TOOL_PATH}")"
   build_binary
   log "二进制: ${BIN_PATH}"
+  log "兑换码签发: ${ISSUE_TOOL_PATH}"
 }
 
 cmd_migrate() {
@@ -152,8 +166,9 @@ cmd_migrate() {
   run_sql "${SERVER_ROOT}/migrations/001_init.sql"
   run_sql "${SERVER_ROOT}/migrations/002_user_identities.sql"
   run_sql "${SERVER_ROOT}/migrations/003_user_profile.sql"
+  run_sql "${SERVER_ROOT}/migrations/004_redemption_codes.sql"
   unset MYSQL_PWD
-  log "迁移完成（001 + 002 + 003，含用户资料列；003 可重复执行）"
+  log "迁移完成（001 … 004；003 可重复执行；004 使用 CREATE TABLE IF NOT EXISTS，可重复执行）"
 }
 
 usage() {
@@ -162,9 +177,9 @@ usage() {
 
 命令:
   first-time   首次安装依赖、编译、安装 systemd（需 root）
-  update       git pull（若存在 .git）、编译、重启服务（需 root）
-  build-only   仅编译到 \${DEPLOY_ROOT}/bin/\${BIN_NAME}（默认不需 root）
-  migrate      按 deploy.local.env 中的 MYSQL_* 执行 migrations/001、002、003（需 root；需 mysql 客户端；003 对已有库可重复执行）
+  update       git pull（若存在 .git）、编译、重启服务（需 root）；若 export RUN_MIGRATE_ON_UPDATE=1 则先执行 migrate
+  build-only   仅编译 noteapi 与 issue_redemption_codes 到 \${DEPLOY_ROOT}/bin/（默认不需 root）
+  migrate      按 deploy.local.env 中的 MYSQL_* 执行 migrations/001 … 004（需 mysql 客户端；003/004 对已有库可安全重复执行）
 
 机密配置（勿提交 Git）:
   复制 scripts/deploy.local.env.example -> scripts/deploy.local.env 并填写
@@ -175,6 +190,7 @@ usage() {
   ENV_FILE=${ENV_FILE}
   SERVICE_NAME=${SERVICE_NAME}
   GIT_REMOTE_PULL=${GIT_REMOTE_PULL}   # update 时是否 git pull，设为 0 可跳过
+  RUN_MIGRATE_ON_UPDATE=${RUN_MIGRATE_ON_UPDATE}   # 设为 1 时 update 会先执行 migrate（须已配置 MYSQL_*）
 
 示例:
   sudo DEPLOY_ROOT=/opt/noteapi ./scripts/deploy.sh first-time
