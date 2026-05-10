@@ -146,6 +146,23 @@ func readJSON[T any](r *http.Request, dst *T) error {
 	return dec.Decode(dst)
 }
 
+// appleAuthDiagnosticsLog 记录 Apple identity_token 校验相关信息（绝不打印完整 JWT）。
+func (s *Server) appleAuthDiagnosticsLog(op string, r *http.Request, rawToken string, verifyErr error) {
+	peek := appleid.InspectIdentityToken(rawToken)
+	allowed := strings.Join(s.Cfg.AppleClientIDs(), ",")
+	remote := strings.TrimSpace(r.RemoteAddr)
+	if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
+		remote = remote + " forwarded=" + xff
+	}
+	if verifyErr != nil {
+		log.Printf("apple_auth op=%s remote=%s token_len=%d jwt_parts=%d alg=%q kid=%q iss=%q aud_claim=%q sub_prefix=%q allowed_aud=%q err=%v",
+			op, remote, peek.TokenLen, peek.NumParts, peek.Alg, peek.Kid, peek.Iss, peek.Aud, peek.SubPrefix, allowed, verifyErr)
+		return
+	}
+	log.Printf("apple_auth op=%s remote=%s verify_pass token_len=%d jwt_parts=%d alg=%q kid=%q iss=%q aud_claim=%q sub_prefix=%q allowed_aud=%q",
+		op, remote, peek.TokenLen, peek.NumParts, peek.Alg, peek.Kid, peek.Iss, peek.Aud, peek.SubPrefix, allowed)
+}
+
 type authWechatReq struct {
 	Code string `json:"code"`
 }
@@ -239,6 +256,7 @@ func (s *Server) handleAuthApple(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sub, err := appleid.VerifyIdentityToken(req.IdentityToken, s.Cfg.AppleClientIDs())
+	s.appleAuthDiagnosticsLog("auth_apple", r, req.IdentityToken, err)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "apple_token_invalid", "message": err.Error()})
 		return
@@ -246,9 +264,11 @@ func (s *Server) handleAuthApple(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	u, err := s.Store.EnsureUserForIdentity(ctx, store.ProviderApple, sub)
 	if err != nil {
+		log.Printf("apple_auth op=auth_apple ensure_user failed: %v", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
 		return
 	}
+	log.Printf("apple_auth op=auth_apple session_issued user_id=%d", u.ID)
 	s.issueAuthToken(w, u.ID)
 }
 
@@ -367,6 +387,7 @@ func (s *Server) handleLinkApple(w http.ResponseWriter, r *http.Request, uid int
 		return
 	}
 	sub, err := appleid.VerifyIdentityToken(req.IdentityToken, s.Cfg.AppleClientIDs())
+	s.appleAuthDiagnosticsLog("link_apple", r, req.IdentityToken, err)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "apple_token_invalid", "message": err.Error()})
 		return
@@ -380,6 +401,7 @@ func (s *Server) handleLinkApple(w http.ResponseWriter, r *http.Request, uid int
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
 		return
 	}
+	log.Printf("apple_auth op=link_apple linked uid=%d", uid)
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "true"})
 }
 
@@ -457,6 +479,7 @@ func (s *Server) handleMergeApple(w http.ResponseWriter, r *http.Request, uid in
 		return
 	}
 	sub, err := appleid.VerifyIdentityToken(req.IdentityToken, s.Cfg.AppleClientIDs())
+	s.appleAuthDiagnosticsLog("merge_apple", r, req.IdentityToken, err)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "apple_token_invalid", "message": err.Error()})
 		return

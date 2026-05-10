@@ -1,8 +1,11 @@
 package main
 
 import (
+	"io"
 	"log"
 	"net/http"
+	"os"
+	"strings"
 
 	"github.com/kymjs/noteapi/internal/api"
 	"github.com/kymjs/noteapi/internal/config"
@@ -11,6 +14,18 @@ import (
 
 func main() {
 	cfg := config.Load()
+
+	// 默认日志到 stderr（systemd / Docker / act_runner 可采集）；可选同时追加到文件便于配合 logrotate。
+	if path := strings.TrimSpace(os.Getenv("LOG_FILE")); path != "" {
+		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			log.Fatalf("open LOG_FILE %s: %v", path, err)
+		}
+		defer f.Close()
+		log.SetOutput(io.MultiWriter(os.Stderr, f))
+		log.Printf("noteapi: logging to stderr and %s", path)
+	}
+
 	st, err := store.OpenMySQL(cfg.MySQLDSN)
 	if err != nil {
 		log.Fatalf("mysql: %v", err)

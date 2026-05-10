@@ -6,6 +6,11 @@
 #   scripts/deploy.local.env
 # 填写 MYSQL_* 等，chmod 600；该文件已列入 server/.gitignore。
 # 也可用环境变量覆盖下方各项。
+#
+# 日志文件 LOG_FILE：由运行中的 noteapi 进程读取（见 systemd 的 EnvironmentFile，默认
+# /etc/noteapi.env）。请在 ENV_FILE 内写一行 LOG_FILE=/path/to/noteapi.log（不要用 bash
+# 的 export；systemd 环境文件格式为 KEY=value）。若设置了 LOG_FILE，本脚本在 first-time /
+# update 时会自动创建其父目录并 touch 该文件，避免首次启动因目录不存在而失败。
 
 set -euo pipefail
 
@@ -48,6 +53,24 @@ export GOPROXY GOSUMDB
 
 log() { printf '[deploy] %s\n' "$*"; }
 die() { printf '[deploy] ERROR: %s\n' "$*" >&2; exit 1; }
+
+# 从 systemd EnvironmentFile（ENV_FILE）解析 LOG_FILE=，创建目录与空日志文件（不解 source 整个文件，避免 MYSQL_DSN 等特殊字符问题）。
+ensure_log_file_path_from_env_file() {
+  [[ -f "${ENV_FILE}" ]] || return 0
+  local raw
+  raw="$(grep -E '^[[:space:]]*LOG_FILE=' "${ENV_FILE}" 2>/dev/null | grep -Ev '^[[:space:]]*#' | tail -n1)" || true
+  [[ -n "${raw}" ]] || return 0
+  local val="${raw#*LOG_FILE=}"
+  val="${val#export }"
+  val="${val//\"/}"
+  val="${val//\'/}"
+  val="$(printf '%s' "${val}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  [[ -n "${val}" ]] || return 0
+  mkdir -p "$(dirname "${val}")"
+  touch "${val}"
+  chmod 644 "${val}" 2>/dev/null || true
+  log "LOG_FILE 已就绪: ${val}（来自 ${ENV_FILE}）"
+}
 
 require_root_for_systemd() {
   if [[ "${EUID:-0}" -ne 0 ]]; then
@@ -111,9 +134,11 @@ cmd_first_time() {
     fi
   fi
 
+  ensure_log_file_path_from_env_file
+
   log ""
   log "后续手工步骤："
-  log "  1) 编辑 ${ENV_FILE}（至少 MYSQL_DSN、JWT_SECRET、业务密钥；头像上传需 AVATAR_WEBDAV_USERNAME/PASSWORD；兑换码签发需 REDEMPTION_ISSUE_SECRET、FEISHU_REDEMPTION_WEBHOOK_URL，见 .env.example）"
+  log "  1) 编辑 ${ENV_FILE}（至少 MYSQL_DSN、JWT_SECRET、业务密钥；头像上传需 AVATAR_WEBDAV_USERNAME/PASSWORD；兑换码签发需 REDEMPTION_ISSUE_SECRET、FEISHU_REDEMPTION_WEBHOOK_URL，见 .env.example；可选取消注释 LOG_FILE= 以追加写文件日志）"
   log "  2) MySQL 迁移（推荐在填写 scripts/deploy.local.env 的 MYSQL_* 后执行）:"
   log "       sudo ${SCRIPT_DIR}/deploy.sh migrate"
   log "     （按文件名排序执行 migrations/[0-9][0-9][0-9]_*.sql；详见 DEPLOYMENT.md）"
@@ -151,6 +176,7 @@ cmd_update() {
     fi
   fi
   build_binary
+  ensure_log_file_path_from_env_file
   systemctl restart "${SERVICE_NAME}.service"
   sleep 0.5
   if ! systemctl is-active --quiet "${SERVICE_NAME}.service"; then
@@ -219,6 +245,7 @@ cmd_rollback() {
   log "=== 回滚二进制（${prev} -> ${BIN_PATH}）==="
   cp -a "${prev}" "${BIN_PATH}"
   chmod 755 "${BIN_PATH}"
+  ensure_log_file_path_from_env_file
   local issue_prev="${ISSUE_TOOL_PATH}.prev"
   if [[ -f "${issue_prev}" ]]; then
     log "同时回滚兑换码工具: ${issue_prev} -> ${ISSUE_TOOL_PATH}"
@@ -262,6 +289,11 @@ usage() {
   RUN_MIGRATE_ON_UPDATE=${RUN_MIGRATE_ON_UPDATE}   # 设为 1 时 update 会先执行 migrate（须已配置 MYSQL_*）
   BACKUP_BIN_ON_UPDATE=${BACKUP_BIN_ON_UPDATE}     # 设为 0 可跳过编译前备份 noteapi/issue 工具为 .prev
   NOTEAPI_HEALTH_URL   # 例如 http://127.0.0.1:9443/healthz；设置后 update 重启成功会 curl 冒烟
+
+进程环境来自 ENV_FILE（systemd EnvironmentFile），追加文件日志示例（不要用 export）：
+  echo 'LOG_FILE=/var/log/noteapi.log' >> /etc/noteapi.env
+  （或在编辑器中取消 .env.example 里 LOG_FILE 一行的注释后同步到 ENV_FILE）
+  first-time / update 会根据 ENV_FILE 中的 LOG_FILE 自动创建目录与空文件。
 
 示例:
   sudo DEPLOY_ROOT=/opt/noteapi ./scripts/deploy.sh first-time

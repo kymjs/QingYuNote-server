@@ -37,6 +37,13 @@ func VerifyIdentityToken(rawToken string, audiences []string) (sub string, err e
 	if rawToken == "" {
 		return "", errors.New("missing apple token")
 	}
+	if peek := InspectIdentityToken(rawToken); peek.Alg != "" && peek.Alg != jwt.SigningMethodES256.Alg() {
+		return "", fmt.Errorf(
+			"jwt alg is %q (Apple identity_token must be %s): send only Sign in with Apple credential.identityToken, not authorizationCode or other JWTs",
+			peek.Alg,
+			jwt.SigningMethodES256.Alg(),
+		)
+	}
 	var expect []string
 	for _, a := range audiences {
 		a = strings.TrimSpace(a)
