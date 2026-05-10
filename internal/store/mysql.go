@@ -87,6 +87,67 @@ func (s *Store) GetUserByID(ctx context.Context, id int64) (*User, error) {
 	return &u, nil
 }
 
+// NormalizeLoginPhoneDigits 去掉首尾空白、可选 +86 前缀，仅保留 ASCII 数字，用于手机号登录比对。
+func NormalizeLoginPhoneDigits(s string) string {
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(s, "+86") {
+		s = strings.TrimSpace(s[3:])
+	}
+	var b strings.Builder
+	for _, r := range s {
+		if r >= '0' && r <= '9' {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func phoneLoginLookupKeys(digits string) []string {
+	if digits == "" {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	var keys []string
+	add := func(k string) {
+		if k == "" {
+			return
+		}
+		if _, ok := seen[k]; ok {
+			return
+		}
+		seen[k] = struct{}{}
+		keys = append(keys, k)
+	}
+	add(digits)
+	if len(digits) == 11 && digits[0] == '1' {
+		add("+86" + digits)
+		add("86" + digits)
+	}
+	return keys
+}
+
+// GetUserByPhone 按资料中的手机号查找用户（兼容存为 11 位、+86、86 前缀）。
+func (s *Store) GetUserByPhone(ctx context.Context, rawPhone string) (*User, error) {
+	digits := NormalizeLoginPhoneDigits(rawPhone)
+	for _, key := range phoneLoginLookupKeys(digits) {
+		var u User
+		q := `SELECT id, folder_key, wechat_openid, created_at,
+			display_name, avatar_url, phone, email, password_hash
+			FROM users WHERE phone = ? LIMIT 1`
+		err := s.DB.QueryRowContext(ctx, q, key).Scan(
+			&u.ID, &u.FolderKey, &u.WechatOID, &u.CreatedAt,
+			&u.DisplayName, &u.AvatarURL, &u.Phone, &u.Email, &u.PasswordHash,
+		)
+		if err == nil {
+			return &u, nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
+	}
+	return nil, sql.ErrNoRows
+}
+
 type SubscriptionRow struct {
 	UserID      int64
 	ExpiresAt   sql.NullTime

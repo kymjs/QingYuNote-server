@@ -123,6 +123,19 @@ func (s *Server) handlePatchProfile(w http.ResponseWriter, r *http.Request, uid 
 
 	passwordSet := u.PasswordHash.Valid && strings.TrimSpace(u.PasswordHash.String) != ""
 
+	// 修改手机号：若账号已设登录密码，须校验当前密码（与请求中的 old_password 一致）。
+	if req.Phone != nil && passwordSet {
+		old := strings.TrimSpace(ptrStr(req.OldPassword))
+		if old == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "old_password_required"})
+			return
+		}
+		if err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash.String), []byte(old)); err != nil {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "old_password_invalid"})
+			return
+		}
+	}
+
 	if req.ClearPassword != nil && *req.ClearPassword {
 		if !passwordSet {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "password_not_set"})

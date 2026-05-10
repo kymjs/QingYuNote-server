@@ -32,6 +32,7 @@ import (
 	"github.com/kymjs/noteapi/internal/wechat"
 	"github.com/kymjs/noteapi/internal/wxnotify"
 	"github.com/kymjs/noteapi/internal/wxpay"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type Server struct {
@@ -91,6 +92,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/auth/wechat", s.handleAuthWechat)
 	mux.HandleFunc("POST /api/v1/auth/huawei", s.handleAuthHuawei)
 	mux.HandleFunc("POST /api/v1/auth/apple", s.handleAuthApple)
+	mux.HandleFunc("POST /api/v1/auth/phone", s.handleAuthPhone)
 	mux.HandleFunc("POST /api/v1/me/link/wechat", s.auth(s.handleLinkWechat))
 	mux.HandleFunc("POST /api/v1/me/link/huawei", s.auth(s.handleLinkHuawei))
 	mux.HandleFunc("POST /api/v1/me/link/apple", s.auth(s.handleLinkApple))
@@ -245,6 +247,43 @@ func (s *Server) handleAuthApple(w http.ResponseWriter, r *http.Request) {
 	u, err := s.Store.EnsureUserForIdentity(ctx, store.ProviderApple, sub)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
+		return
+	}
+	s.issueAuthToken(w, u.ID)
+}
+
+type authPhoneReq struct {
+	Phone    string `json:"phone"`
+	Password string `json:"password"`
+}
+
+func (s *Server) handleAuthPhone(w http.ResponseWriter, r *http.Request) {
+	var req authPhoneReq
+	if err := readJSON(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_body"})
+		return
+	}
+	if strings.TrimSpace(req.Phone) == "" || strings.TrimSpace(req.Password) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_body"})
+		return
+	}
+	ctx := r.Context()
+	u, err := s.Store.GetUserByPhone(ctx, req.Phone)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid_credentials"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
+		return
+	}
+	if !u.PasswordHash.Valid || strings.TrimSpace(u.PasswordHash.String) == "" {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "password_not_set"})
+		return
+	}
+	pw := strings.TrimSpace(req.Password)
+	if err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash.String), []byte(pw)); err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid_credentials"})
 		return
 	}
 	s.issueAuthToken(w, u.ID)
