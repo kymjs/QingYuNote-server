@@ -33,7 +33,7 @@ SERVICE_NAME="${SERVICE_NAME:-noteapi}"
 GIT_REMOTE_PULL="${GIT_REMOTE_PULL:-1}"
 # update 时若为 1，则在编译前自动执行 migrate（需在 deploy.local.env 配置 MYSQL_*）
 RUN_MIGRATE_ON_UPDATE="${RUN_MIGRATE_ON_UPDATE:-0}"
-# update 时若为 1，在覆盖二进制前将现有 noteapi 复制为 ${BIN_PATH}.prev（便于快速回滚）
+# update 时若为 1，在覆盖二进制前将现有 noteapi / issue_redemption_codes 复制为 *.prev（便于 rollback）
 BACKUP_BIN_ON_UPDATE="${BACKUP_BIN_ON_UPDATE:-1}"
 # 若设置（如 http://127.0.0.1:9443/healthz），update 在重启成功后会 curl 做一次冒烟（需本机可访问监听地址）
 NOTEAPI_HEALTH_URL="${NOTEAPI_HEALTH_URL:-}"
@@ -116,7 +116,7 @@ cmd_first_time() {
   log "  1) 编辑 ${ENV_FILE}（至少 MYSQL_DSN、JWT_SECRET、业务密钥；头像上传需 AVATAR_WEBDAV_USERNAME/PASSWORD；兑换码签发需 REDEMPTION_ISSUE_SECRET、FEISHU_REDEMPTION_WEBHOOK_URL，见 .env.example）"
   log "  2) MySQL 迁移（推荐在填写 scripts/deploy.local.env 的 MYSQL_* 后执行）:"
   log "       sudo ${SCRIPT_DIR}/deploy.sh migrate"
-  log "     或手工: mysql ... < migrations/001_init.sql … 直至 004_redemption_codes.sql（详见 DEPLOYMENT.md）"
+  log "     （按文件名排序执行 migrations/[0-9][0-9][0-9]_*.sql；详见 DEPLOYMENT.md）"
   log "  3) systemctl start ${SERVICE_NAME} && systemctl status ${SERVICE_NAME}"
   log "  4) 配置 Nginx/Caddy 反代到 LISTEN_ADDR（默认 :9443）"
   log "  5) 签发兑换码（需在同一主机 source ${ENV_FILE} 或导出 MYSQL_DSN、REDEMPTION_ISSUE_SECRET）:"
@@ -137,12 +137,18 @@ cmd_update() {
     fi
   fi
   if [[ "${RUN_MIGRATE_ON_UPDATE}" == "1" ]]; then
-    log "RUN_MIGRATE_ON_UPDATE=1：执行数据库迁移（001 … 004）"
+    log "RUN_MIGRATE_ON_UPDATE=1：执行数据库迁移（migrations 目录全部 *.sql）"
     cmd_migrate
   fi
-  if [[ "${BACKUP_BIN_ON_UPDATE}" == "1" ]] && [[ -f "${BIN_PATH}" ]]; then
-    log "备份现有二进制: ${BIN_PATH} -> ${BIN_PATH}.prev"
-    cp -a "${BIN_PATH}" "${BIN_PATH}.prev"
+  if [[ "${BACKUP_BIN_ON_UPDATE}" == "1" ]]; then
+    if [[ -f "${BIN_PATH}" ]]; then
+      log "备份现有二进制: ${BIN_PATH} -> ${BIN_PATH}.prev"
+      cp -a "${BIN_PATH}" "${BIN_PATH}.prev"
+    fi
+    if [[ -f "${ISSUE_TOOL_PATH}" ]]; then
+      log "备份兑换码工具: ${ISSUE_TOOL_PATH} -> ${ISSUE_TOOL_PATH}.prev"
+      cp -a "${ISSUE_TOOL_PATH}" "${ISSUE_TOOL_PATH}.prev"
+    fi
   fi
   build_binary
   systemctl restart "${SERVICE_NAME}.service"
@@ -187,12 +193,50 @@ cmd_migrate() {
     log "执行迁移: ${f}"
     mysql -h"${MYSQL_HOST}" -P"${MYSQL_PORT}" -u"${MYSQL_USER}" "${MYSQL_DATABASE}" < "${f}"
   }
-  run_sql "${SERVER_ROOT}/migrations/001_init.sql"
-  run_sql "${SERVER_ROOT}/migrations/002_user_identities.sql"
-  run_sql "${SERVER_ROOT}/migrations/003_user_profile.sql"
-  run_sql "${SERVER_ROOT}/migrations/004_redemption_codes.sql"
+
+  shopt -s nullglob
+  local mig_files=("${SERVER_ROOT}/migrations/"[0-9][0-9][0-9]_*.sql)
+  shopt -u nullglob
+  if [[ ${#mig_files[@]} -eq 0 ]]; then
+    unset MYSQL_PWD
+    die "未找到 ${SERVER_ROOT}/migrations/[0-9][0-9][0-9]_*.sql"
+  fi
+  local sorted=()
+  mapfile -t sorted < <(printf '%s\n' "${mig_files[@]}" | LC_ALL=C sort -V)
+  local f
+  for f in "${sorted[@]}"; do
+    [[ -n "${f}" ]] || continue
+    run_sql "${f}"
+  done
   unset MYSQL_PWD
-  log "迁移完成（001 … 004；003 可重复执行；004 使用 CREATE TABLE IF NOT EXISTS，可重复执行）"
+  log "迁移完成（共 ${#sorted[@]} 个 SQL；003 等脚本可按列检测跳过重复 ALTER）"
+}
+
+cmd_rollback() {
+  require_root_for_systemd
+  local prev="${BIN_PATH}.prev"
+  [[ -f "${prev}" ]] || die "不存在 ${prev}，无法回滚（请先成功执行过一次带 BACKUP_BIN_ON_UPDATE=1 的 update）"
+  log "=== 回滚二进制（${prev} -> ${BIN_PATH}）==="
+  cp -a "${prev}" "${BIN_PATH}"
+  chmod 755 "${BIN_PATH}"
+  local issue_prev="${ISSUE_TOOL_PATH}.prev"
+  if [[ -f "${issue_prev}" ]]; then
+    log "同时回滚兑换码工具: ${issue_prev} -> ${ISSUE_TOOL_PATH}"
+    cp -a "${issue_prev}" "${ISSUE_TOOL_PATH}"
+    chmod 755 "${ISSUE_TOOL_PATH}"
+  fi
+  systemctl restart "${SERVICE_NAME}.service"
+  sleep 0.5
+  if ! systemctl is-active --quiet "${SERVICE_NAME}.service"; then
+    journalctl -u "${SERVICE_NAME}.service" -n 30 --no-pager 2>/dev/null || true
+    die "${SERVICE_NAME} 未能进入 active，请检查日志"
+  fi
+  log "已回滚并重启 ${SERVICE_NAME}（active）"
+  if [[ -n "${NOTEAPI_HEALTH_URL}" ]] && command -v curl >/dev/null 2>&1; then
+    curl -fsS --connect-timeout 3 --max-time 10 "${NOTEAPI_HEALTH_URL}" >/dev/null \
+      && log "health 检查通过" \
+      || log "health 检查失败（请确认 NOTEAPI_HEALTH_URL）"
+  fi
 }
 
 usage() {
@@ -203,7 +247,8 @@ usage() {
   first-time   首次安装依赖、编译、安装 systemd（需 root）
   update       git pull（若存在 .git）、编译、重启服务（需 root）；若 export RUN_MIGRATE_ON_UPDATE=1 则先执行 migrate
   build-only   仅编译 noteapi 与 issue_redemption_codes 到 \${DEPLOY_ROOT}/bin/（默认不需 root）
-  migrate      按 deploy.local.env 中的 MYSQL_* 执行 migrations/001 … 004（需 mysql 客户端；003/004 对已有库可安全重复执行）
+  migrate      按 deploy.local.env 中的 MYSQL_* 顺序执行 migrations/[0-9][0-9][0-9]_*.sql（需 mysql 客户端）
+  rollback     用上次 update 备份的 *.prev 覆盖当前二进制并重启服务（需 root；依赖先前 BACKUP_BIN_ON_UPDATE=1）
 
 机密配置（勿提交 Git）:
   复制 scripts/deploy.local.env.example -> scripts/deploy.local.env 并填写
@@ -215,12 +260,13 @@ usage() {
   SERVICE_NAME=${SERVICE_NAME}
   GIT_REMOTE_PULL=${GIT_REMOTE_PULL}   # update 时是否 git pull，设为 0 可跳过
   RUN_MIGRATE_ON_UPDATE=${RUN_MIGRATE_ON_UPDATE}   # 设为 1 时 update 会先执行 migrate（须已配置 MYSQL_*）
-  BACKUP_BIN_ON_UPDATE=${BACKUP_BIN_ON_UPDATE}     # 设为 0 可跳过编译前备份为 .prev
+  BACKUP_BIN_ON_UPDATE=${BACKUP_BIN_ON_UPDATE}     # 设为 0 可跳过编译前备份 noteapi/issue 工具为 .prev
   NOTEAPI_HEALTH_URL   # 例如 http://127.0.0.1:9443/healthz；设置后 update 重启成功会 curl 冒烟
 
 示例:
   sudo DEPLOY_ROOT=/opt/noteapi ./scripts/deploy.sh first-time
   sudo ./scripts/deploy.sh update
+  sudo ./scripts/deploy.sh rollback   # 新版本异常时恢复上一版二进制
 EOF
 }
 
@@ -231,6 +277,7 @@ main() {
     update)     cmd_update ;;
     build-only) cmd_build_only ;;
     migrate)    cmd_migrate ;;
+    rollback)   cmd_rollback ;;
     ""|-h|--help|help) usage ;;
     *) die "未知命令: ${sub}" ;;
   esac
