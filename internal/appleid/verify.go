@@ -31,37 +31,57 @@ type jwksDoc struct {
 }
 
 // VerifyIdentityToken 校验 Apple identity_token（ES256），并返回 token 中的 sub。
-func VerifyIdentityToken(rawToken, audience string) (sub string, err error) {
+// audiences 中任一项与 token 的 aud 匹配即通过（用于同时支持 iOS Bundle ID 与 Web Services ID）。
+func VerifyIdentityToken(rawToken string, audiences []string) (sub string, err error) {
 	rawToken = strings.TrimSpace(rawToken)
-	audience = strings.TrimSpace(audience)
-	if rawToken == "" || audience == "" {
-		return "", errors.New("missing apple token or audience")
+	if rawToken == "" {
+		return "", errors.New("missing apple token")
+	}
+	var expect []string
+	for _, a := range audiences {
+		a = strings.TrimSpace(a)
+		if a != "" {
+			expect = append(expect, a)
+		}
+	}
+	if len(expect) == 0 {
+		return "", errors.New("missing apple audience")
 	}
 
-	parser := jwt.NewParser(
-		jwt.WithValidMethods([]string{jwt.SigningMethodES256.Alg()}),
-		jwt.WithIssuer(appleIssuer),
-		jwt.WithAudience(audience),
-		jwt.WithLeeway(10*time.Second),
-	)
-
-	var ac jwt.RegisteredClaims
-	_, err = parser.ParseWithClaims(rawToken, &ac, func(t *jwt.Token) (any, error) {
+	keyFunc := func(t *jwt.Token) (any, error) {
 		kid, _ := t.Header["kid"].(string)
 		kid = strings.TrimSpace(kid)
 		if kid == "" {
 			return nil, errors.New("missing jwt kid")
 		}
 		return publicKeyForKid(kid)
-	})
-	if err != nil {
-		return "", err
 	}
-	s := strings.TrimSpace(ac.Subject)
-	if s == "" {
-		return "", errors.New("missing sub")
+
+	var lastErr error
+	for _, audience := range expect {
+		parser := jwt.NewParser(
+			jwt.WithValidMethods([]string{jwt.SigningMethodES256.Alg()}),
+			jwt.WithIssuer(appleIssuer),
+			jwt.WithAudience(audience),
+			jwt.WithLeeway(10*time.Second),
+		)
+		var ac jwt.RegisteredClaims
+		_, err := parser.ParseWithClaims(rawToken, &ac, keyFunc)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		s := strings.TrimSpace(ac.Subject)
+		if s == "" {
+			lastErr = errors.New("missing sub")
+			continue
+		}
+		return s, nil
 	}
-	return s, nil
+	if lastErr != nil {
+		return "", lastErr
+	}
+	return "", errors.New("apple token verification failed")
 }
 
 func publicKeyForKid(kid string) (*ecdsa.PublicKey, error) {

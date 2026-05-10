@@ -130,7 +130,24 @@ func (c *Config) HuaweiOAuthConfigured() bool {
 }
 
 func (c *Config) AppleSignInConfigured() bool {
-	return strings.TrimSpace(c.AppleClientID) != ""
+	return len(c.AppleClientIDs()) > 0
+}
+
+// AppleClientIDs 返回允许的 identity_token aud 列表（逗号分隔）。
+// iOS 原生登录 aud 为 Xcode Bundle ID；网页 OAuth 常见为 Services ID。
+func (c *Config) AppleClientIDs() []string {
+	raw := strings.TrimSpace(c.AppleClientID)
+	if raw == "" {
+		return nil
+	}
+	var out []string
+	for _, p := range strings.Split(raw, ",") {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func (c *Config) NotifyURL() string {

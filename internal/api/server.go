@@ -238,7 +238,7 @@ func (s *Server) handleAuthApple(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_body"})
 		return
 	}
-	sub, err := appleid.VerifyIdentityToken(req.IdentityToken, s.Cfg.AppleClientID)
+	sub, err := appleid.VerifyIdentityToken(req.IdentityToken, s.Cfg.AppleClientIDs())
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "apple_token_invalid", "message": err.Error()})
 		return
@@ -366,7 +366,7 @@ func (s *Server) handleLinkApple(w http.ResponseWriter, r *http.Request, uid int
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_body"})
 		return
 	}
-	sub, err := appleid.VerifyIdentityToken(req.IdentityToken, s.Cfg.AppleClientID)
+	sub, err := appleid.VerifyIdentityToken(req.IdentityToken, s.Cfg.AppleClientIDs())
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "apple_token_invalid", "message": err.Error()})
 		return
@@ -456,7 +456,7 @@ func (s *Server) handleMergeApple(w http.ResponseWriter, r *http.Request, uid in
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_body"})
 		return
 	}
-	sub, err := appleid.VerifyIdentityToken(req.IdentityToken, s.Cfg.AppleClientID)
+	sub, err := appleid.VerifyIdentityToken(req.IdentityToken, s.Cfg.AppleClientIDs())
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "apple_token_invalid", "message": err.Error()})
 		return
