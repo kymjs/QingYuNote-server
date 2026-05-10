@@ -497,10 +497,7 @@ type webdavResp struct {
 
 func (s *Server) handleQingyuWebDAV(w http.ResponseWriter, r *http.Request, uid int64) {
 	now := time.Now().UTC()
-	if !s.qingyuGuard.allow(uid, now) {
-		writeTooManyRequests(w)
-		return
-	}
+	// 先走短时缓存命中：避免「同一凭据」在 TTL 内重复请求仍吃掉每分钟配额（此前会导致多终端/多入口并发时大量 429）。
 	if cached, ok := s.qingyuGuard.getCached(uid, now); ok {
 		ctx := r.Context()
 		sub, err := s.Store.GetSubscription(ctx, uid)
@@ -517,6 +514,10 @@ func (s *Server) handleQingyuWebDAV(w http.ResponseWriter, r *http.Request, uid 
 			return
 		}
 		s.qingyuGuard.invalidate(uid)
+	}
+	if !s.qingyuGuard.allow(uid, now) {
+		writeTooManyRequests(w)
+		return
 	}
 
 	ctx := r.Context()
