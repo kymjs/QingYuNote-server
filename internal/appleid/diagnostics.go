@@ -1,9 +1,10 @@
 package appleid
 
 import (
-	"encoding/base64"
-	"encoding/json"
+	"fmt"
 	"strings"
+
+	"github.com/golang-jwt/jwt/v5"
 )
 
 // IdentityTokenPeek 仅从 JWT 解析公开字段（不验证签名），用于运维日志。
@@ -18,56 +19,41 @@ type IdentityTokenPeek struct {
 	NumParts  int // JWT 分段数，正常为 3
 }
 
-func padJWTBase64URL(seg string) string {
-	switch len(seg) % 4 {
-	case 2:
-		return seg + "=="
-	case 3:
-		return seg + "="
-	default:
-		return seg
-	}
-}
-
 // InspectIdentityToken 解析 Apple identity_token 的 header/payload（不验签），供日志使用。
+// 解码逻辑与 golang-jwt 校验路径对齐（含可选 padding），避免出现日志里 alg 为空而校验阶段仍能读出 RS256 的不一致。
 func InspectIdentityToken(raw string) IdentityTokenPeek {
 	raw = strings.TrimSpace(raw)
 	p := IdentityTokenPeek{TokenLen: len(raw)}
 	parts := strings.Split(raw, ".")
 	p.NumParts = len(parts)
-	if len(parts) < 1 {
-		return p
-	}
-	hdrJSON, err := base64.RawURLEncoding.DecodeString(padJWTBase64URL(parts[0]))
-	if err != nil {
-		return p
-	}
-	var hdr map[string]any
-	if err := json.Unmarshal(hdrJSON, &hdr); err != nil {
-		return p
-	}
-	p.Alg, _ = hdr["alg"].(string)
-	p.Alg = strings.TrimSpace(p.Alg)
-	p.Kid, _ = hdr["kid"].(string)
-	p.Kid = strings.TrimSpace(p.Kid)
 
-	if len(parts) < 2 {
+	var tok *jwt.Token
+	var err error
+	// 与常见「非标准 padding」实现兼容；校验失败时再退回默认 Parser（与 VerifyIdentityToken 内 ParseWithClaims 一致）。
+	for _, parser := range []*jwt.Parser{
+		jwt.NewParser(jwt.WithPaddingAllowed()),
+		jwt.NewParser(),
+	} {
+		tok, _, err = parser.ParseUnverified(raw, jwt.MapClaims{})
+		if err == nil && tok != nil {
+			break
+		}
+		tok = nil
+	}
+	if tok == nil || tok.Header == nil {
 		return p
 	}
-	payloadJSON, err := base64.RawURLEncoding.DecodeString(padJWTBase64URL(parts[1]))
-	if err != nil {
+
+	p.Alg = anyString(tok.Header["alg"])
+	p.Kid = anyString(tok.Header["kid"])
+
+	mc, ok := tok.Claims.(jwt.MapClaims)
+	if !ok || mc == nil {
 		return p
 	}
-	var claims map[string]any
-	if err := json.Unmarshal(payloadJSON, &claims); err != nil {
-		return p
-	}
-	p.Iss, _ = claims["iss"].(string)
-	p.Iss = strings.TrimSpace(p.Iss)
-	p.Aud = flattenAudClaim(claims["aud"])
-	sub, _ := claims["sub"].(string)
-	sub = strings.TrimSpace(sub)
-	if sub != "" {
+	p.Iss = anyString(mc["iss"])
+	p.Aud = flattenAudClaim(mc["aud"])
+	if sub := anyString(mc["sub"]); sub != "" {
 		r := []rune(sub)
 		const max = 12
 		if len(r) > max {
@@ -77,6 +63,16 @@ func InspectIdentityToken(raw string) IdentityTokenPeek {
 		}
 	}
 	return p
+}
+
+func anyString(v any) string {
+	if v == nil {
+		return ""
+	}
+	if s, ok := v.(string); ok {
+		return strings.TrimSpace(s)
+	}
+	return strings.TrimSpace(fmt.Sprint(v))
 }
 
 func flattenAudClaim(v any) string {
