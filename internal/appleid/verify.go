@@ -3,6 +3,7 @@ package appleid
 import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
+	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -30,19 +31,26 @@ type jwksDoc struct {
 	Keys []map[string]any `json:"keys"`
 }
 
-// VerifyIdentityToken 校验 Apple identity_token（ES256），并返回 token 中的 sub。
+// VerifyIdentityToken 校验 Apple identity_token（Apple JWKS 当前对 identity_token 使用 RS256；
+// 历史上也曾出现 EC/ES256，故同时支持 RS256 与 ES256），并返回 token 中的 sub。
 // audiences 中任一项与 token 的 aud 匹配即通过（用于同时支持 iOS Bundle ID 与 Web Services ID）。
 func VerifyIdentityToken(rawToken string, audiences []string) (sub string, err error) {
 	rawToken = strings.TrimSpace(rawToken)
 	if rawToken == "" {
 		return "", errors.New("missing apple token")
 	}
-	if peek := InspectIdentityToken(rawToken); peek.Alg != "" && peek.Alg != jwt.SigningMethodES256.Alg() {
-		return "", fmt.Errorf(
-			"jwt alg is %q (Apple identity_token must be %s): send only Sign in with Apple credential.identityToken, not authorizationCode or other JWTs",
-			peek.Alg,
-			jwt.SigningMethodES256.Alg(),
-		)
+	if peek := InspectIdentityToken(rawToken); peek.Alg != "" {
+		switch peek.Alg {
+		case jwt.SigningMethodRS256.Alg(), jwt.SigningMethodES256.Alg():
+			// ok
+		default:
+			return "", fmt.Errorf(
+				"jwt alg is %q (Apple identity_token uses %s or %s): send Sign in with Apple credential.identityToken only",
+				peek.Alg,
+				jwt.SigningMethodRS256.Alg(),
+				jwt.SigningMethodES256.Alg(),
+			)
+		}
 	}
 	var expect []string
 	for _, a := range audiences {
@@ -67,7 +75,10 @@ func VerifyIdentityToken(rawToken string, audiences []string) (sub string, err e
 	var lastErr error
 	for _, audience := range expect {
 		parser := jwt.NewParser(
-			jwt.WithValidMethods([]string{jwt.SigningMethodES256.Alg()}),
+			jwt.WithValidMethods([]string{
+				jwt.SigningMethodRS256.Alg(),
+				jwt.SigningMethodES256.Alg(),
+			}),
 			jwt.WithIssuer(appleIssuer),
 			jwt.WithAudience(audience),
 			jwt.WithLeeway(10*time.Second),
@@ -91,7 +102,7 @@ func VerifyIdentityToken(rawToken string, audiences []string) (sub string, err e
 	return "", errors.New("apple token verification failed")
 }
 
-func publicKeyForKid(kid string) (*ecdsa.PublicKey, error) {
+func publicKeyForKid(kid string) (any, error) {
 	doc, err := fetchAppleJWKS()
 	if err != nil {
 		return nil, err
@@ -101,7 +112,15 @@ func publicKeyForKid(kid string) (*ecdsa.PublicKey, error) {
 		if strings.TrimSpace(kidVal) != kid {
 			continue
 		}
-		return mapECJWKToPublicKey(k)
+		kty, _ := k["kty"].(string)
+		switch strings.TrimSpace(kty) {
+		case "RSA":
+			return mapRSAJWKToPublicKey(k)
+		case "EC":
+			return mapECJWKToPublicKey(k)
+		default:
+			return nil, fmt.Errorf("apple jwks: unsupported kty %q for kid %q", kty, kid)
+		}
 	}
 	return nil, fmt.Errorf("apple jwks: no key for kid %q", kid)
 }
@@ -141,6 +160,36 @@ func fetchAppleJWKS() (*jwksDoc, error) {
 	jwksCached = &doc
 	jwksFetched = time.Now()
 	return jwksCached, nil
+}
+
+func mapRSAJWKToPublicKey(k map[string]any) (*rsa.PublicKey, error) {
+	kty, _ := k["kty"].(string)
+	if strings.TrimSpace(kty) != "RSA" {
+		return nil, errors.New("expected RSA key")
+	}
+	nStr, _ := k["n"].(string)
+	eStr, _ := k["e"].(string)
+	if strings.TrimSpace(nStr) == "" || strings.TrimSpace(eStr) == "" {
+		return nil, errors.New("missing rsa n/e")
+	}
+	nb, err := base64.RawURLEncoding.DecodeString(nStr)
+	if err != nil {
+		return nil, err
+	}
+	eb, err := base64.RawURLEncoding.DecodeString(eStr)
+	if err != nil {
+		return nil, err
+	}
+	n := new(big.Int).SetBytes(nb)
+	e := new(big.Int).SetBytes(eb)
+	if !e.IsInt64() {
+		return nil, errors.New("rsa exponent too large")
+	}
+	exp := int(e.Int64())
+	if exp < 2 {
+		return nil, errors.New("invalid rsa exponent")
+	}
+	return &rsa.PublicKey{N: n, E: exp}, nil
 }
 
 func mapECJWKToPublicKey(k map[string]any) (*ecdsa.PublicKey, error) {
