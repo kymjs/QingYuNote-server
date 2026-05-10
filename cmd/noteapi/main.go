@@ -23,7 +23,6 @@ func main() {
 		}
 		defer f.Close()
 		log.SetOutput(io.MultiWriter(os.Stderr, f))
-		log.Printf("noteapi: logging to stderr and %s", path)
 	}
 
 	st, err := store.OpenMySQL(cfg.MySQLDSN)

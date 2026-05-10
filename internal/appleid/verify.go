@@ -39,14 +39,14 @@ func VerifyIdentityToken(rawToken string, audiences []string) (sub string, err e
 	if rawToken == "" {
 		return "", errors.New("missing apple token")
 	}
-	if peek := InspectIdentityToken(rawToken); peek.Alg != "" {
-		switch peek.Alg {
+	if alg := jwtAlgPeek(rawToken); alg != "" {
+		switch alg {
 		case jwt.SigningMethodRS256.Alg(), jwt.SigningMethodES256.Alg():
 			// ok
 		default:
 			return "", fmt.Errorf(
 				"jwt alg is %q (Apple identity_token uses %s or %s): send Sign in with Apple credential.identityToken only",
-				peek.Alg,
+				alg,
 				jwt.SigningMethodRS256.Alg(),
 				jwt.SigningMethodES256.Alg(),
 			)
@@ -218,4 +218,25 @@ func mapECJWKToPublicKey(k map[string]any) (*ecdsa.PublicKey, error) {
 		return nil, errors.New("invalid EC point")
 	}
 	return &ecdsa.PublicKey{Curve: curve, X: x, Y: y}, nil
+}
+
+// jwtAlgPeek 仅解析 JWT 头中的 alg（不验签），供拒绝非 RS256/ES256 的误用 token。
+func jwtAlgPeek(raw string) string {
+	raw = strings.TrimSpace(raw)
+	var tok *jwt.Token
+	for _, p := range []*jwt.Parser{
+		jwt.NewParser(jwt.WithPaddingAllowed()),
+		jwt.NewParser(),
+	} {
+		t, _, err := p.ParseUnverified(raw, jwt.MapClaims{})
+		if err == nil && t != nil && t.Header != nil {
+			tok = t
+			break
+		}
+	}
+	if tok == nil {
+		return ""
+	}
+	s, _ := tok.Header["alg"].(string)
+	return strings.TrimSpace(s)
 }
