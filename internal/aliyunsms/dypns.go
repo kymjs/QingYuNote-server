@@ -38,6 +38,7 @@ func SendVerifyCode(cli *dypnsapi.Client, p SMSParams, phoneDigits string) error
 	req.TemplateParam = param
 	req.CodeType = requests.NewInteger(1)
 	req.Interval = requests.NewInteger(60)
+	req.CountryCode = "86"
 	if sn := strings.TrimSpace(p.SchemeName); sn != "" {
 		req.SchemeName = sn
 	}
@@ -64,6 +65,7 @@ func CheckVerifyCode(cli *dypnsapi.Client, p SMSParams, phoneDigits, verifyCode 
 	req := dypnsapi.CreateCheckSmsVerifyCodeRequest()
 	req.PhoneNumber = strings.TrimSpace(phoneDigits)
 	req.VerifyCode = strings.TrimSpace(verifyCode)
+	req.CountryCode = "86"
 	if sn := strings.TrimSpace(p.SchemeName); sn != "" {
 		req.SchemeName = sn
 	}
