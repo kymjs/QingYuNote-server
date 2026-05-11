@@ -1,6 +1,6 @@
 # 轻羽云笔记 Note API（Go）
 
-提供微信 OAuth 换 JWT、订阅状态、轻羽云 WebDAV 凭据下发、微信支付下单与回调。
+提供微信 OAuth 换 JWT、订阅状态、轻羽云 WebDAV 凭据下发、微信支付下单与回调，以及 **App Store 内购交易（JWS）校验**（与微信并行）。
 
 **文档**：完整接口与数据库说明见 [`TECHNICAL.md`](TECHNICAL.md)；空白服务器部署与更新流程见 [`DEPLOYMENT.md`](DEPLOYMENT.md)（含 `scripts/deploy.sh`）。
 
@@ -41,6 +41,18 @@ export HUAWEI_REDIRECT_URI=''   # 与客户端、AGC 回调一致；可留空视
 ```bash
 export APPLE_CLIENT_ID='com.example.app'   # 与 identity_token 的 aud 一致
 ```
+
+若启用 **iOS App Store 内购（轻羽云订单苹果支付）**，须配置与 App Store Connect 一致的 Bundle ID、商品 ID；正式上架建议在环境中填写 App 的数字 Apple ID：
+
+```bash
+export APPLE_IAP_BUNDLE_ID='com.kymjs.note'
+export APPLE_IAP_PRODUCT_MONTHLY='com.kymjs.note.qingyu.monthly'
+export APPLE_IAP_PRODUCT_HALF_YEAR='com.kymjs.note.qingyu.half_year'
+export APPLE_IAP_PRODUCT_YEARLY='com.kymjs.note.qingyu.yearly'
+export APPLE_APP_STORE_APP_ID='1234567890'   # App Store Connect → App 信息 → Apple ID；沙盒调试可暂不设
+```
+
+根证书：`internal/appstoreiap/AppleRootCA-G3.cer`（随仓库用于 JWS 链校验）。
 
 启动：
 
@@ -88,6 +100,7 @@ export WECHAT_PAY_PLATFORM_CERT_PEM_PATH='/path/to/wechatpay_platform.pem'
 | GET | `/api/v1/qingyu/webdav` | Bearer；订阅有效且已配置 `QINGYU_WEBDAV_*` 时返回 NAS；`notes_dir` 为当前 JWT 用户对应 `users.id`，形如 `/{id}/`，每人不同；单用户约 60 次/分钟限流 + 45s 响应缓存 |
 | POST | `/api/v1/orders` | Bearer body `{ "plan_id": "monthly\|half_year\|yearly" }` |
 | POST | `/api/v1/orders/{id}/wechat/prepay` | Bearer → APP 调起参数 |
+| POST | `/api/v1/orders/{id}/apple/verify` | Bearer body `{ "signed_transaction": "<JWS>" }`（须配置 `APPLE_IAP_*`） |
 | GET | `/api/v1/orders/{id}` | Bearer |
 | POST | `/api/v1/webhooks/wechat/pay` | 微信服务器回调 |
 | GET | `/healthz` | 健康检查 |

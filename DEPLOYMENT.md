@@ -24,8 +24,8 @@
 
 - 已解析到本机的域名（如 `noteapi.kymjs.com`），HTTPS 证书（Let’s Encrypt 或云厂商证书）。
 - MySQL 5.7+ / 8.0（本机安装 **或** 云 RDS）。
-- 微信开放平台 AppID/Secret、（可选）华为 AGC OAuth、Apple Sign In、微信支付商户与证书等——按业务填写到环境变量，**勿提交仓库**。
-- 本机安装 **Go 1.22+**（用于在服务器上编译；也可在 CI 编译后只上传二进制）。
+- 微信开放平台 AppID/Secret、（可选）华为 AGC OAuth、Apple Sign In、微信支付商户与证书等——按业务填写到环境变量，**勿提交仓库**。若启用 **iOS App Store 内购**校验，还需在环境变量中配置 `APPLE_IAP_*` 与（正式环境）`APPLE_APP_STORE_APP_ID`，见 `server/.env.example`。
+- 本机安装 **Go 1.24+**（用于在服务器上编译；也可在 CI 编译后只上传二进制）。
 
 ---
 
@@ -38,7 +38,7 @@
    sudo apt install -y git ca-certificates curl
    # 本机跑 MySQL 时：sudo apt install -y mysql-server
    # 反代：sudo apt install -y nginx
-   # 编译本服务：需 Go 1.22+（Ubuntu 仓库版本若偏旧，请从 https://go.dev/dl 安装官方包）
+   # 编译本服务：需 Go 1.24+（Ubuntu 仓库版本若偏旧，请从 https://go.dev/dl 安装官方包）
    ```
 
 2. **MySQL**：创建数据库与用户，授予该库 `ALL` 权限。
@@ -65,7 +65,7 @@
    - 一键：`sudo ./scripts/deploy.sh migrate`（按 `deploy.local.env` 连接数据库，顺序执行 `001`～`004`，含兑换码表）。
    - `001`、`002` 本身具备幂等或可重复特性；**`003_user_profile.sql` 通过检测列是否已存在跳过重复 `ALTER`**，已在运行且库里已有数据的实例也可安全执行（重复执行不会报错）。
    - 若你只上线过旧二进制、从未执行过 `003`，发布含「个人信息」的版本前**必须先跑完 `003`**，再重启服务，否则读写资料相关接口会缺列。
-3. **若环境变量有新增项**：更新 `/etc/noteapi.env`（按 `server/.env.example` 逐项核对；例如用户头像依赖 **`AVATAR_WEBDAV_*`** 与 **`AVATAR_PUBLIC_BASE_URL`**，详见 `TECHNICAL.md` §2.7）。
+3. **若环境变量有新增项**：更新 `/etc/noteapi.env`（按 `server/.env.example` 逐项核对；例如用户头像依赖 **`AVATAR_WEBDAV_*`** 与 **`AVATAR_PUBLIC_BASE_URL`**（详见 `TECHNICAL.md` §2.7）；App Store 内购依赖 **`APPLE_IAP_*`**、**`APPLE_APP_STORE_APP_ID`**）。
 4. **重新编译并重启服务**（或使用脚本）：
    ```bash
    cd /path/to/note/server

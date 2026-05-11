@@ -83,7 +83,7 @@ ensure_go() {
     export PATH="/usr/local/go/bin:${PATH}"
   fi
   if ! command -v go >/dev/null 2>&1; then
-    die "未检测到 go。若已安装到 /usr/local/go，请确认存在 /usr/local/go/bin/go；否则请安装 Go 1.22+： https://go.dev/dl （sudo 下若仍报错，可先执行: export PATH=/usr/local/go/bin:\$PATH）"
+    die "未检测到 go。若已安装到 /usr/local/go，请确认存在 /usr/local/go/bin/go；否则请安装 Go 1.24+： https://go.dev/dl （sudo 下若仍报错，可先执行: export PATH=/usr/local/go/bin:\$PATH）"
   fi
   go version
 }

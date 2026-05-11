@@ -225,6 +225,24 @@ func (s *Store) GetOrderByOutTradeNo(ctx context.Context, out string) (*Order, e
 	return &o, nil
 }
 
+// GetOrderByTransactionID 用于苹果 / 微信等网关 transaction id 幂等与冲突检测。
+func (s *Store) GetOrderByTransactionID(ctx context.Context, txID string) (*Order, error) {
+	txID = strings.TrimSpace(txID)
+	if txID == "" {
+		return nil, sql.ErrNoRows
+	}
+	var o Order
+	q := `SELECT id, user_id, out_trade_no, plan_id, amount_total, status, created_at, paid_at, transaction_id
+		FROM orders WHERE transaction_id = ?`
+	err := s.DB.QueryRowContext(ctx, q, txID).Scan(
+		&o.ID, &o.UserID, &o.OutTradeNo, &o.PlanID, &o.AmountTotal, &o.Status, &o.CreatedAt, &o.PaidAt, &o.TransactionID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &o, nil
+}
+
 func (s *Store) MarkOrderPaid(ctx context.Context, outTradeNo, transactionID string) error {
 	now := time.Now().UTC()
 	q := `UPDATE orders SET status = 'paid', paid_at = ?, transaction_id = ? WHERE out_trade_no = ? AND status = 'pending'`

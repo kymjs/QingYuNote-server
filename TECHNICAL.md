@@ -136,12 +136,13 @@
 
 **常见错误**：403 `subscription_required`；503 `qingyu_webdav_not_configured`；429 限流（带 `Retry-After`）。
 
-### 2.9 订单与微信支付
+### 2.9 订单与支付（微信 / Apple）
 
 | 方法 | 路径 | 鉴权 | 说明 |
 |------|------|------|------|
 | POST | `/api/v1/orders` | Bearer | body：`{ "plan_id": "monthly" \| "half_year" \| "yearly" }` |
 | POST | `/api/v1/orders/{id}/wechat/prepay` | Bearer | APP 调起参数；商户未配置 → 503 `wechat_pay_not_configured` |
+| POST | `/api/v1/orders/{id}/apple/verify` | Bearer | body：`{ "signed_transaction": "<JWS>" }`；校验 StoreKit 交易 JWS，通过后标记 `paid` 并顺延订阅；未配置 `APPLE_IAP_*` → 503 `apple_iap_not_configured` |
 | GET | `/api/v1/orders/{id}` | Bearer | 查询订单 |
 
 **套餐与金额（分）**（`internal/config/config.go`）：
@@ -153,6 +154,8 @@
 创建订单成功：`id`、`out_trade_no`、`plan_id`、`amount_total`、`status`（`pending`）。
 
 Prepay 200：`app_id`、`partner_id`、`prepay_id`、`package`、`nonce_str`、`timestamp`、`sign`、`sign_type`。
+
+Apple verify 200：`status` 为 `paid`（或幂等时可为 `already_paid`）。失败常见：`apple_jws_invalid`、`apple_product_plan_mismatch`、`duplicate_apple_transaction`。
 
 ### 2.10 微信支付异步通知（服务端对微信）
 
@@ -213,7 +216,7 @@ Prepay 200：`app_id`、`partner_id`、`prepay_id`、`package`、`nonce_str`、`
 | amount_total | INT | 金额（分） |
 | status | VARCHAR(24) | 如 `pending`、`paid` |
 | created_at / paid_at | DATETIME(3) | — |
-| transaction_id | VARCHAR(128) NULL | 微信支付单号 |
+| transaction_id | VARCHAR(128) NULL | 网关交易号（微信 `transaction_id` 或 Apple `transactionId`） |
 
 ---
 
@@ -230,7 +233,7 @@ Prepay 200：`app_id`、`partner_id`、`prepay_id`、`package`、`nonce_str`、`
 | `GetSubscription` | mysql.go | 读订阅行 |
 | `UpsertSubscriptionExpiry` | mysql.go | 插入或更新订阅 |
 | `CreateOrder` | mysql.go | 创建订单 |
-| `GetOrderByID` / `GetOrderByOutTradeNo` | mysql.go | 查单 |
+| `GetOrderByID` / `GetOrderByOutTradeNo` / `GetOrderByTransactionID` | mysql.go | 查单 |
 | `MarkOrderPaid` | mysql.go | 标记已支付 |
 | `LookupUserIDByIdentity` | identities.go | provider+subject → user_id |
 | `EnsureUserForIdentity` | identities.go | 无则创建用户+身份 |
@@ -251,6 +254,9 @@ Prepay 200：`app_id`、`partner_id`、`prepay_id`、`package`、`nonce_str`、`
 | `WECHAT_APP_ID` / `WECHAT_APP_SECRET` | 微信开放平台应用 |
 | `HUAWEI_CLIENT_ID` / `HUAWEI_CLIENT_SECRET` / `HUAWEI_REDIRECT_URI` | 华为 OAuth |
 | `APPLE_CLIENT_ID` | Sign in with Apple 的 `aud` |
+| `APPLE_IAP_BUNDLE_ID` | IAP JWS 校验用 Bundle ID（默认 `com.kymjs.note`） |
+| `APPLE_IAP_PRODUCT_MONTHLY` / `HALF_YEAR` / `YEARLY` | App Store 商品 ID，须与客户端、`plan_id` 映射一致 |
+| `APPLE_APP_STORE_APP_ID` | App Store Connect 中 App 的数字 Apple ID；正式环境 JWS 校验需要 |
 | `QINGYU_WEBDAV_BASE_URL` / `USERNAME` / `PASSWORD` | 轻羽 NAS 下发 |
 | `AVATAR_WEBDAV_BASE_URL` / `AVATAR_WEBDAV_USERNAME` / `AVATAR_WEBDAV_PASSWORD` | 用户头像：WebDAV 上传目标（三项齐全才启用 `POST /api/v1/me/avatar`） |
 | `AVATAR_PUBLIC_BASE_URL` | 头像对外访问 URL 前缀（与 CDN 一致，不含末尾 `/`；默认见 `config.go`） |

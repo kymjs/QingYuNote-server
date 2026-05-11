@@ -26,6 +26,13 @@ type Config struct {
 	// Apple Sign In：校验 identity_token 的 aud（App ID / Services ID）。
 	AppleClientID string
 
+	// App Store 内购（轻羽云）：校验客户端上报的 signedTransaction（JWS）。
+	AppleIAPBundleID          string
+	AppleIAPProductMonthly    string
+	AppleIAPProductHalfYear   string
+	AppleIAPProductYearly     string
+	AppleAppStoreAppID        int64 // App Store Connect「App 信息」中的 Apple ID（数字）；Production 校验链需要。
+
 	QingyuWebDAVBaseURL  string
 	QingyuWebDAVUsername string
 	QingyuWebDAVPassword string
@@ -71,6 +78,12 @@ func Load() *Config {
 
 		AppleClientID: getenv("APPLE_CLIENT_ID", ""),
 
+		AppleIAPBundleID: getenv("APPLE_IAP_BUNDLE_ID", "com.kymjs.note"),
+		// 须与 App Store Connect 中 IAP 商品 ID 一致（Flutter 构建时可覆盖默认值）。
+		AppleIAPProductMonthly:  getenv("APPLE_IAP_PRODUCT_MONTHLY", "com.kymjs.note.qingyu.monthly"),
+		AppleIAPProductHalfYear: getenv("APPLE_IAP_PRODUCT_HALF_YEAR", "com.kymjs.note.qingyu.half_year"),
+		AppleIAPProductYearly:   getenv("APPLE_IAP_PRODUCT_YEARLY", "com.kymjs.note.qingyu.yearly"),
+
 		// 轻羽 WebDAV 仅通过部署环境注入，仓库内不设默认值，避免公开仓库泄露凭据。
 		QingyuWebDAVBaseURL:  getenv("QINGYU_WEBDAV_BASE_URL", ""),
 		QingyuWebDAVUsername: getenv("QINGYU_WEBDAV_USERNAME", ""),
@@ -99,6 +112,14 @@ func Load() *Config {
 	}
 	if !c.AvatarWebDAVConfigured() {
 		log.Printf("warning: AVATAR_WEBDAV_USERNAME / PASSWORD unset — avatar upload returns 503 until set")
+	}
+	// App Store 数字 App ID：用于 JWS 在 Production 环境的校验；沙盒可留 0。
+	if raw := strings.TrimSpace(getenv("APPLE_APP_STORE_APP_ID", "")); raw != "" {
+		if id, err := strconv.ParseInt(raw, 10, 64); err == nil {
+			c.AppleAppStoreAppID = id
+		} else {
+			log.Printf("warning: APPLE_APP_STORE_APP_ID invalid: %v", err)
+		}
 	}
 	return c
 }
@@ -152,6 +173,32 @@ func (c *Config) AppleClientIDs() []string {
 
 func (c *Config) NotifyURL() string {
 	return c.PublicBaseURL + c.WechatPayNotifyPath
+}
+
+// AppleIAPVerifyConfigured 为 true 时允许校验苹果内购 JWS（Bundle ID 与各档位商品 ID 已配置）。
+func (c *Config) AppleIAPVerifyConfigured() bool {
+	return strings.TrimSpace(c.AppleIAPBundleID) != "" &&
+		strings.TrimSpace(c.AppleIAPProductMonthly) != "" &&
+		strings.TrimSpace(c.AppleIAPProductHalfYear) != "" &&
+		strings.TrimSpace(c.AppleIAPProductYearly) != ""
+}
+
+// PlanFromAppleProductID 将 App Store 商品 ID 映射为订单 plan_id；无法识别时返回空串。
+func (c *Config) PlanFromAppleProductID(productID string) string {
+	p := strings.TrimSpace(productID)
+	if p == "" {
+		return ""
+	}
+	switch p {
+	case strings.TrimSpace(c.AppleIAPProductMonthly):
+		return "monthly"
+	case strings.TrimSpace(c.AppleIAPProductHalfYear):
+		return "half_year"
+	case strings.TrimSpace(c.AppleIAPProductYearly):
+		return "yearly"
+	default:
+		return ""
+	}
 }
 
 func ParsePlanMonths(plan string) int {

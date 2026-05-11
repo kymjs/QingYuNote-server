@@ -24,6 +24,7 @@ import (
 	"github.com/wechatpay-apiv3/wechatpay-go/utils"
 
 	"github.com/kymjs/noteapi/internal/appleid"
+	"github.com/kymjs/noteapi/internal/appstoreiap"
 	"github.com/kymjs/noteapi/internal/auth"
 	"github.com/kymjs/noteapi/internal/config"
 	"github.com/kymjs/noteapi/internal/huawei"
@@ -108,6 +109,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/qingyu/webdav", s.auth(s.handleQingyuWebDAV))
 	mux.HandleFunc("POST /api/v1/orders", s.auth(s.handleCreateOrder))
 	mux.HandleFunc("POST /api/v1/orders/{id}/wechat/prepay", s.auth(s.handleWeChatPrepay))
+	mux.HandleFunc("POST /api/v1/orders/{id}/apple/verify", s.auth(s.handleAppleVerifyOrder))
 	mux.HandleFunc("GET /api/v1/orders/{id}", s.auth(s.handleGetOrder))
 	mux.HandleFunc("POST /api/v1/webhooks/wechat/pay", s.handleWeChatPayNotify)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -688,6 +690,124 @@ func (s *Server) handleGetOrder(w http.ResponseWriter, r *http.Request, uid int6
 	})
 }
 
+type appleVerifyReq struct {
+	SignedTransaction string `json:"signed_transaction"`
+}
+
+func (s *Server) extendQingyuSubscriptionAfterPayment(ctx context.Context, userID int64, planID string) {
+	sub, errSub := s.Store.GetSubscription(ctx, userID)
+	if errSub != nil && !errors.Is(errSub, sql.ErrNoRows) {
+		log.Printf("subscription read after payment: %v", errSub)
+		return
+	}
+	if errors.Is(errSub, sql.ErrNoRows) {
+		sub = nil
+	}
+	newExp, lifetime := subscription.ExtendAfterPayment(sub, planID, time.Now().UTC())
+	if lifetime {
+		_ = s.Store.UpsertSubscriptionExpiry(ctx, userID, time.Date(2099, 12, 31, 0, 0, 0, 0, time.UTC), true)
+	} else {
+		_ = s.Store.UpsertSubscriptionExpiry(ctx, userID, newExp, false)
+	}
+	s.qingyuGuard.invalidate(userID)
+}
+
+func (s *Server) handleAppleVerifyOrder(w http.ResponseWriter, r *http.Request, uid int64) {
+	if !s.Cfg.AppleIAPVerifyConfigured() {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error":   "apple_iap_not_configured",
+			"message": "服务端未配置 APPLE_IAP_BUNDLE_ID / APPLE_IAP_PRODUCT_* 内购商品 ID",
+		})
+		return
+	}
+	idStr := r.PathValue("id")
+	oid := config.ParseOrderIDParam(idStr)
+	if oid <= 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_order"})
+		return
+	}
+	var req appleVerifyReq
+	if err := readJSON(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_body"})
+		return
+	}
+	jws := strings.TrimSpace(req.SignedTransaction)
+	if jws == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing_signed_transaction"})
+		return
+	}
+	ctx := r.Context()
+	o, err := s.Store.GetOrderByID(ctx, oid)
+	if err != nil || o.UserID != uid {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "order_not_found"})
+		return
+	}
+	if o.Status != "pending" {
+		if o.Status == "paid" {
+			writeJSON(w, http.StatusOK, map[string]string{"status": "already_paid"})
+			return
+		}
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "order_not_payable"})
+		return
+	}
+
+	payload, err := appstoreiap.VerifySignedTransaction(s.Cfg.AppleIAPBundleID, s.Cfg.AppleAppStoreAppID, jws)
+	if err != nil {
+		log.Printf("apple verify jws: %v", err)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "apple_jws_invalid", "message": err.Error()})
+		return
+	}
+	if payload.RevocationDate != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "apple_transaction_revoked"})
+		return
+	}
+	tid := strings.TrimSpace(payload.TransactionId)
+	if tid == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing_transaction_id"})
+		return
+	}
+	planFromApple := s.Cfg.PlanFromAppleProductID(strings.TrimSpace(payload.ProductId))
+	if planFromApple == "" || planFromApple != o.PlanID {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "apple_product_plan_mismatch"})
+		return
+	}
+
+	prev, errLookup := s.Store.GetOrderByTransactionID(ctx, tid)
+	if errLookup != nil && !errors.Is(errLookup, sql.ErrNoRows) {
+		log.Printf("apple verify lookup transaction: %v", errLookup)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
+		return
+	}
+	if errLookup == nil && prev != nil {
+		if prev.UserID != uid {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "transaction_conflict"})
+			return
+		}
+		if prev.ID != o.ID {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "duplicate_apple_transaction"})
+			return
+		}
+		if prev.Status == "paid" {
+			writeJSON(w, http.StatusOK, map[string]string{"status": "paid"})
+			return
+		}
+	}
+
+	if err := s.Store.MarkOrderPaid(ctx, o.OutTradeNo, tid); err != nil {
+		refreshed, err2 := s.Store.GetOrderByID(ctx, oid)
+		if err2 == nil && refreshed.Status == "paid" &&
+			refreshed.TransactionID.Valid && refreshed.TransactionID.String == tid {
+			writeJSON(w, http.StatusOK, map[string]string{"status": "paid"})
+			return
+		}
+		log.Printf("apple mark paid: %v", err)
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "order_pay_state_conflict"})
+		return
+	}
+	s.extendQingyuSubscriptionAfterPayment(ctx, o.UserID, o.PlanID)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "paid"})
+}
+
 func (s *Server) handleWeChatPayNotify(w http.ResponseWriter, r *http.Request) {
 	if s.notifyHandler == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "notify_not_configured"})
@@ -733,22 +853,7 @@ func (s *Server) handleWeChatPayNotify(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"code": "SUCCESS", "message": "OK"})
 		return
 	}
-	sub, errSub := s.Store.GetSubscription(ctx, dbo.UserID)
-	if errSub != nil && !errors.Is(errSub, sql.ErrNoRows) {
-		log.Printf("notify subscription read: %v", errSub)
-		writeJSON(w, http.StatusOK, map[string]string{"code": "SUCCESS", "message": "OK"})
-		return
-	}
-	if errors.Is(errSub, sql.ErrNoRows) {
-		sub = nil
-	}
-	newExp, lifetime := subscription.ExtendAfterPayment(sub, dbo.PlanID, time.Now().UTC())
-	if lifetime {
-		_ = s.Store.UpsertSubscriptionExpiry(ctx, dbo.UserID, time.Date(2099, 12, 31, 0, 0, 0, 0, time.UTC), true)
-	} else {
-		_ = s.Store.UpsertSubscriptionExpiry(ctx, dbo.UserID, newExp, false)
-	}
-	s.qingyuGuard.invalidate(dbo.UserID)
+	s.extendQingyuSubscriptionAfterPayment(ctx, dbo.UserID, dbo.PlanID)
 	writeJSON(w, http.StatusOK, map[string]string{"code": "SUCCESS", "message": "OK"})
 }
 
