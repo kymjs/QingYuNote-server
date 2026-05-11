@@ -51,6 +51,16 @@ type Config struct {
 	WechatPayAPIv3Key       string
 
 	WechatPayNotifyPath string
+
+	// 阿里云号码认证（短信验证码）：修改密码等场景 SendSmsVerifyCode / CheckSmsVerifyCode。
+	AliyunAccessKeyID     string
+	AliyunAccessKeySecret string
+	AliyunSMSRegion       string
+	AliyunSMSSignName     string
+	AliyunSMSTemplateCode string
+	AliyunSMSSchemeName   string
+	// AliyunSMSTemplateParam JSON，默认 {"code":"##code##","min":"5"}；须与控制台模板变量一致。
+	AliyunSMSTemplateParam string
 }
 
 func getenv(key, def string) string {
@@ -102,6 +112,14 @@ func Load() *Config {
 		WechatPayAPIv3Key:       getenv("WECHAT_PAY_API_V3_KEY", ""),
 
 		WechatPayNotifyPath: getenv("WECHAT_PAY_NOTIFY_PATH", "/api/v1/webhooks/wechat/pay"),
+
+		AliyunAccessKeyID:      getenv("ALIYUN_ACCESS_KEY_ID", ""),
+		AliyunAccessKeySecret:  getenv("ALIYUN_ACCESS_KEY_SECRET", ""),
+		AliyunSMSRegion:        getenv("ALIYUN_SMS_REGION", "cn-hangzhou"),
+		AliyunSMSSignName:      getenv("ALIYUN_SMS_SIGN_NAME", ""),
+		AliyunSMSTemplateCode:  getenv("ALIYUN_SMS_TEMPLATE_CODE", ""),
+		AliyunSMSSchemeName:    getenv("ALIYUN_SMS_SCHEME_NAME", ""),
+		AliyunSMSTemplateParam: getenv("ALIYUN_SMS_TEMPLATE_PARAM", `{"code":"##code##","min":"5"}`),
 	}
 
 	if c.JWTSecret == "" {
@@ -225,6 +243,14 @@ func PlanAmountFen(plan string) int {
 	default:
 		return 0
 	}
+}
+
+// AliyunSMSConfigured 为 true 时允许发送/核验短信验证码（修改密码短信流程）。
+func (c *Config) AliyunSMSConfigured() bool {
+	return strings.TrimSpace(c.AliyunAccessKeyID) != "" &&
+		strings.TrimSpace(c.AliyunAccessKeySecret) != "" &&
+		strings.TrimSpace(c.AliyunSMSSignName) != "" &&
+		strings.TrimSpace(c.AliyunSMSTemplateCode) != ""
 }
 
 func ParseOrderIDParam(v string) int64 {

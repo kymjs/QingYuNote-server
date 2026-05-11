@@ -10,6 +10,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/kymjs/noteapi/internal/aliyunsms"
 	"github.com/kymjs/noteapi/internal/qingyuwebdav"
 	"github.com/kymjs/noteapi/internal/store"
 	"github.com/kymjs/noteapi/internal/subscription"
@@ -98,6 +99,8 @@ type patchProfileReq struct {
 	OldPassword    *string `json:"old_password"`
 	NewPassword    *string `json:"new_password"`
 	ClearPassword  *bool   `json:"clear_password"`
+	// SmsVerifyCode 非空时，修改密码走短信核验（与阿里云 CheckSmsVerifyCode），不再要求 old_password。
+	SmsVerifyCode *string `json:"sms_verify_code"`
 }
 
 func (s *Server) handlePatchProfile(w http.ResponseWriter, r *http.Request, uid int64) {
@@ -166,7 +169,34 @@ func (s *Server) handlePatchProfile(w http.ResponseWriter, r *http.Request, uid 
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "password_too_short"})
 			return
 		}
-		if passwordSet {
+		smsCode := strings.TrimSpace(ptrStr(req.SmsVerifyCode))
+		if smsCode != "" {
+			if !s.Cfg.AliyunSMSConfigured() {
+				writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "sms_not_configured"})
+				return
+			}
+			if !u.Phone.Valid || strings.TrimSpace(u.Phone.String) == "" {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "phone_not_bound"})
+				return
+			}
+			dbDigits := store.NormalizeLoginPhoneDigits(u.Phone.String)
+			cli, err := aliyunsms.NewClient(s.Cfg.AliyunSMSRegion, s.Cfg.AliyunAccessKeyID, s.Cfg.AliyunAccessKeySecret)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "sms_client_failed"})
+				return
+			}
+			params := aliyunsms.SMSParams{
+				SignName:      s.Cfg.AliyunSMSSignName,
+				TemplateCode:  s.Cfg.AliyunSMSTemplateCode,
+				SchemeName:    s.Cfg.AliyunSMSSchemeName,
+				TemplateParam: s.Cfg.AliyunSMSTemplateParam,
+			}
+			ok, err := aliyunsms.CheckVerifyCode(cli, params, dbDigits, smsCode)
+			if err != nil || !ok {
+				writeJSON(w, http.StatusForbidden, map[string]string{"error": "sms_code_invalid"})
+				return
+			}
+		} else if passwordSet {
 			old := strings.TrimSpace(ptrStr(req.OldPassword))
 			if old == "" {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "old_password_required"})
