@@ -7,7 +7,7 @@ import (
 	sdkerrors "github.com/aliyun/alibaba-cloud-sdk-go/sdk/errors"
 )
 
-// ClassifySendError 将发送验证码阶段的错误映射为 API error 字段使用的短码，便于客户端提示；detail 供服务端日志记录。
+// ClassifySendError 将发送验证码阶段的错误映射为 API error 字段使用的短码；detail 供服务端日志记录。
 func ClassifySendError(err error) (apiCode string, detail string) {
 	if err == nil {
 		return "", ""
@@ -20,6 +20,7 @@ func ClassifySendError(err error) (apiCode string, detail string) {
 		msg := strings.TrimSpace(se.Message())
 		detail = code + ": " + msg
 		u := strings.ToUpper(code)
+
 		switch u {
 		case "FUNCTION_NOT_OPENED":
 			return "sms_feature_not_opened", detail
@@ -31,21 +32,24 @@ func ClassifySendError(err error) (apiCode string, detail string) {
 			return "invalid_phone", detail
 		case "INVALID_PARAMETERS":
 			return "sms_invalid_params", detail
-		case "MissingPhoneNumbers", "IllegalPhoneNumber":
+		case "MISSINGPHONENUMBERS", "ILLEGALPHONENUMBER":
 			return "invalid_phone", detail
 		}
-		ul := strings.ToUpper(code)
-		if strings.Contains(ul, "SIGN") || strings.Contains(ul, "TEMPLATE") {
-			return "sms_sign_template_mismatch", detail
-		}
-		if strings.Contains(ul, "ACCESSKEY") || strings.Contains(ul, "SIGNATURE") ||
-			strings.Contains(ul, "FORBIDDEN") || strings.Contains(ul, "RAM") {
+
+		// ① AccessKey / RPC 签名（与「短信签名 SignName」无关）：须先于下面「模板/短信签名」判断，
+		// 否则 SignatureDoesNotMatch 会因含有 SIGN 被误判为 sms_sign_template_mismatch。
+		if isAccessOrRpcSignatureError(u) {
 			return "sms_aliyun_auth", detail
 		}
+
+		// ② 控制台赠送短信签名、模板 CODE、模板变量
+		if isSmsProductSignOrTemplateError(u) {
+			return "sms_sign_template_mismatch", detail
+		}
+
 		return "sms_send_failed", detail
 	}
 
-	// 本包 SendVerifyCode 返回的 aliyun:业务码:说明
 	s := err.Error()
 	if strings.HasPrefix(s, "aliyun:") {
 		rest := strings.TrimPrefix(s, "aliyun:")
@@ -67,7 +71,10 @@ func ClassifySendError(err error) (apiCode string, detail string) {
 		case "INVALID_PARAMETERS":
 			return "sms_invalid_params", detail
 		}
-		if strings.Contains(u, "SIGN") || strings.Contains(u, "TEMPLATE") {
+		if isAccessOrRpcSignatureError(u) {
+			return "sms_aliyun_auth", detail
+		}
+		if isSmsProductSignOrTemplateError(u) {
 			return "sms_sign_template_mismatch", detail
 		}
 	}
@@ -85,4 +92,38 @@ func ClassifySendError(err error) (apiCode string, detail string) {
 	}
 
 	return "sms_send_failed", detail
+}
+
+// AccessKey、RPC 请求签名（HMAC）、RAM 拒绝；不含短信业务「签名名称」类错误。
+func isAccessOrRpcSignatureError(codeUpper string) bool {
+	switch codeUpper {
+	case "SIGNATUREDOESNOTMATCH", "INCOMPLETESIGNATURE", "SIGNATURENONCEEXPIRED",
+		"INVALIDTIMESTAMP", "NONCEEXPIRED":
+		return true
+	}
+	if strings.HasPrefix(codeUpper, "INVALIDACCESSKEYID") {
+		return true
+	}
+	if strings.Contains(codeUpper, "SUBUSER") && strings.Contains(codeUpper, "PERMISSION") {
+		return true
+	}
+	if strings.HasPrefix(codeUpper, "FORBIDDEN") || strings.HasPrefix(codeUpper, "NOPERMISSION") {
+		return true
+	}
+	if strings.Contains(codeUpper, "ACCESSDENIED") && strings.Contains(codeUpper, "AUTHORIZATION") {
+		return true
+	}
+	return false
+}
+
+// 号码认证控制台侧：签名名称、模板 CODE、模板与变量不匹配等。
+func isSmsProductSignOrTemplateError(codeUpper string) bool {
+	switch codeUpper {
+	case "INVALIDSIGNNAME", "SIGNNAMENOTMATCH", "INVALIDTEMPLATE",
+		"TEMPLATENOTEXIST":
+		return true
+	}
+	return strings.Contains(codeUpper, "SIGNNAME") ||
+		strings.Contains(codeUpper, "TEMPLATECODE") ||
+		strings.Contains(codeUpper, "TEMPLATEPARAM")
 }
