@@ -26,6 +26,9 @@ type Config struct {
 	// Apple Sign In：校验 identity_token 的 aud（App ID / Services ID）。
 	AppleClientID string
 
+	// iOS Universal Link（微信等）：apple-app-site-association 中 appID 前缀，10 位 Team ID。
+	AppleAppSiteAssociationTeamID string
+
 	// App Store 内购（轻羽云）：校验客户端上报的 signedTransaction（JWS）。
 	AppleIAPBundleID          string
 	AppleIAPProductMonthly    string
@@ -87,6 +90,8 @@ func Load() *Config {
 		HuaweiRedirectURI:  getenv("HUAWEI_REDIRECT_URI", ""),
 
 		AppleClientID: getenv("APPLE_CLIENT_ID", ""),
+
+		AppleAppSiteAssociationTeamID: getenv("APPLE_APP_SITE_ASSOCIATION_TEAM_ID", ""),
 
 		AppleIAPBundleID: getenv("APPLE_IAP_BUNDLE_ID", "com.kymjs.note"),
 		// 须与 App Store Connect 中 IAP 商品 ID 一致（Flutter 构建时可覆盖默认值）。

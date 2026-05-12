@@ -58,6 +58,15 @@
    - **公开短信频控**（注册/重置密码等）：服务端按客户端 IP 等维度计数时优先读 **`X-Forwarded-For` 首段**（见 `internal/api/server.go` 的 `clientIP`）。反代须把真实客户端 IP 写入该头（例如 Nginx `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`），否则 IP 维度会落在反代或内网地址上。实现为**进程内内存**、**无新增环境变量与迁移**；多副本时各实例独立计数，扩容与运维含义见 `TECHNICAL.md` 第 2.11 节。
 8. **防火墙**：在 Ubuntu 上通常用 **ufw**（见上文）；反代只监听 443 时，Go 可只绑 `127.0.0.1:9443`（`LISTEN_ADDR=127.0.0.1:9443`），不必对公网开放 9443。
 
+### 2.1 iOS 微信 Universal Link（`https://note.kymjs.com/wx/login/`）
+
+本仓库在 noteapi 进程内提供：
+
+- `GET /.well-known/apple-app-site-association`（及兼容路径 `GET /apple-app-site-association`）：JSON，需配置 **`APPLE_APP_SITE_ASSOCIATION_TEAM_ID`**（与 Xcode 中 App 的 **Team ID** 一致，10 位）。
+- `GET /wx/login/`：极简 HTML 落地页；`GET /wx/login` 会 **302** 到带末尾 `/` 的地址。
+
+若 **`https://note.kymjs.com` 与 API 域名分离**（例如官网为静态站、API 为 `noteapi.kymjs.com`），须在 **`note.kymjs.com` 的 HTTPS 反代**上把上述路径转到本服务（与 `/healthz` 类似 `proxy_pass` 到 `127.0.0.1:9443`），否则苹果/微信无法从该域名拉取 AASA。环境变量 **`APPLE_IAP_BUNDLE_ID`** 须与 iOS 实际 Bundle ID 一致（默认 `com.kymjs.note`）。
+
 ---
 
 ## 3. 代码更新后如何处理
@@ -67,7 +76,7 @@
    - 一键：`sudo ./scripts/deploy.sh migrate`（按 `deploy.local.env` 连接数据库，顺序执行 `migrations/[0-9][0-9][0-9]_*.sql`，含 `004` 兑换码与 `005` 会籍充值审计表）。
    - `001`、`002` 本身具备幂等或可重复特性；**`003_user_profile.sql` 通过检测列是否已存在跳过重复 `ALTER`**，已在运行且库里已有数据的实例也可安全执行（重复执行不会报错）。
    - 若你只上线过旧二进制、从未执行过 `003`，发布含「个人信息」的版本前**必须先跑完 `003`**，再重启服务，否则读写资料相关接口会缺列。
-3. **若环境变量有新增项**：更新 `/etc/noteapi.env`（按 `server/.env.example` 逐项核对；例如用户头像依赖 **`AVATAR_WEBDAV_*`** 与 **`AVATAR_PUBLIC_BASE_URL`**（详见 `TECHNICAL.md` §2.7）；App Store 内购依赖 **`APPLE_IAP_*`**、**`APPLE_APP_STORE_APP_ID`**）。**公开短信进程内频控**不引入新的 env 键；上线后只需确认反代 **`X-Forwarded-For`** 与多实例行为（见上文「反向代理」小条与 `TECHNICAL.md` 第 2.11 节）。
+3. **若环境变量有新增项**：更新 `/etc/noteapi.env`（按 `server/.env.example` 逐项核对；例如用户头像依赖 **`AVATAR_WEBDAV_*`** 与 **`AVATAR_PUBLIC_BASE_URL`**（详见 `TECHNICAL.md` §2.7）；App Store 内购依赖 **`APPLE_IAP_*`**、**`APPLE_APP_STORE_APP_ID`**；iOS 微信 Universal Link 依赖 **`APPLE_APP_SITE_ASSOCIATION_TEAM_ID`** 且 `note.kymjs.com` 须反代 AASA 与 `/wx/login/` 路径，见上文 §2.1）。**公开短信进程内频控**不引入新的 env 键；上线后只需确认反代 **`X-Forwarded-For`** 与多实例行为（见上文「反向代理」小条与 `TECHNICAL.md` 第 2.11 节）。
 4. **重新编译并重启服务**（或使用脚本）：
    ```bash
    cd /path/to/note/server

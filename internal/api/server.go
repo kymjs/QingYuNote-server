@@ -28,9 +28,9 @@ import (
 	"github.com/kymjs/noteapi/internal/auth"
 	"github.com/kymjs/noteapi/internal/config"
 	"github.com/kymjs/noteapi/internal/huawei"
+	"github.com/kymjs/noteapi/internal/smsquota"
 	"github.com/kymjs/noteapi/internal/store"
 	"github.com/kymjs/noteapi/internal/subscription"
-	"github.com/kymjs/noteapi/internal/smsquota"
 	"github.com/kymjs/noteapi/internal/wechat"
 	"github.com/kymjs/noteapi/internal/wxnotify"
 	"github.com/kymjs/noteapi/internal/wxpay"
@@ -51,10 +51,10 @@ type Server struct {
 
 func NewServer(cfg *config.Config, st *store.Store) (*Server, error) {
 	s := &Server{
-		Cfg:       cfg,
-		Store:     st,
+		Cfg:         cfg,
+		Store:       st,
 		qingyuGuard: newQingyuWebDAVGuard(),
-		smsQuota:  smsquota.New(smsPublicQuotaPerWindow, 24*time.Hour),
+		smsQuota:    smsquota.New(smsPublicQuotaPerWindow, 24*time.Hour),
 	}
 	if cfg.WechatPayConfigured() {
 		priv, err := utils.LoadPrivateKeyWithPath(cfg.WechatPayPrivateKeyPath)
@@ -133,6 +133,11 @@ func (s *Server) Routes() http.Handler {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
+	// iOS 微信 Universal Link：https://note.kymjs.com/wx/login/（同域须反代至本服务，见 DEPLOYMENT.md）
+	mux.HandleFunc("GET /.well-known/apple-app-site-association", s.handleAppleAppSiteAssociation)
+	mux.HandleFunc("GET /apple-app-site-association", s.handleAppleAppSiteAssociation)
+	mux.HandleFunc("GET /wx/login/", s.handleWXUniversalLinkLanding)
+	mux.HandleFunc("GET /wx/login", s.handleWXLoginNoTrailingSlash)
 	return mux
 }
 
@@ -740,83 +745,118 @@ func (s *Server) extendQingyuSubscriptionAfterPayment(ctx context.Context, userI
 	}
 }
 
+func mergeAppleVerifyOK(status string, extra map[string]any) map[string]any {
+	out := map[string]any{"status": status}
+	for k, v := range extra {
+		out[k] = v
+	}
+	return out
+}
+
 func (s *Server) handleAppleVerifyOrder(w http.ResponseWriter, r *http.Request, uid int64) {
 	if !s.Cfg.AppleIAPVerifyConfigured() {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
-			"error":   "apple_iap_not_configured",
-			"message": "服务端未配置 APPLE_IAP_BUNDLE_ID / APPLE_IAP_PRODUCT_* 内购商品 ID",
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"error":            "apple_iap_not_configured",
+			"message":          "服务端未配置 APPLE_IAP_BUNDLE_ID / APPLE_IAP_PRODUCT_* 内购商品 ID",
+			"payment_verified": false,
 		})
 		return
 	}
 	idStr := r.PathValue("id")
 	oid := config.ParseOrderIDParam(idStr)
 	if oid <= 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_order"})
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_order", "payment_verified": false})
 		return
 	}
 	var req appleVerifyReq
 	if err := readJSON(r, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_body"})
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_body", "payment_verified": false})
 		return
 	}
 	jws := strings.TrimSpace(req.SignedTransaction)
 	if jws == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing_signed_transaction"})
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "missing_signed_transaction", "payment_verified": false})
 		return
 	}
 	ctx := r.Context()
 	o, err := s.Store.GetOrderByID(ctx, oid)
 	if err != nil || o.UserID != uid {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "order_not_found"})
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "order_not_found", "payment_verified": false})
 		return
 	}
 	if o.Status != "pending" {
 		if o.Status == "paid" {
-			writeJSON(w, http.StatusOK, map[string]string{"status": "already_paid"})
+			writeJSON(w, http.StatusOK, map[string]any{
+				"status": "already_paid", "payment_verified": true,
+				"message": "订单已支付",
+			})
 			return
 		}
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "order_not_payable"})
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "order_not_payable", "payment_verified": false})
 		return
 	}
 
 	payload, err := appstoreiap.VerifySignedTransaction(s.Cfg.AppleIAPBundleID, s.Cfg.AppleAppStoreAppID, jws)
 	if err != nil {
 		log.Printf("apple verify jws: %v", err)
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "apple_jws_invalid", "message": err.Error()})
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"error": "apple_jws_invalid", "message": err.Error(), "payment_verified": false,
+		})
 		return
 	}
-	if payload.RevocationDate != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "apple_transaction_revoked"})
+	if err := appstoreiap.ValidateTransactionEligibleForCredit(payload, s.Cfg.AppleIAPBundleID); err != nil {
+		code := "apple_transaction_invalid"
+		switch {
+		case errors.Is(err, appstoreiap.ErrTransactionRevoked):
+			code = "apple_transaction_revoked"
+		case errors.Is(err, appstoreiap.ErrMissingBundleInPayload):
+			code = "apple_bundle_missing"
+		case errors.Is(err, appstoreiap.ErrBundleMismatch):
+			code = "apple_bundle_mismatch"
+		case errors.Is(err, appstoreiap.ErrInvalidTransactionType):
+			code = "apple_transaction_type_invalid"
+		case errors.Is(err, appstoreiap.ErrMissingPurchaseDate):
+			code = "apple_missing_purchase_date"
+		}
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"error": code, "message": err.Error(), "payment_verified": false,
+		})
 		return
 	}
 	tid := strings.TrimSpace(payload.TransactionId)
 	if tid == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing_transaction_id"})
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "missing_transaction_id", "payment_verified": false})
 		return
 	}
 	planFromApple := s.Cfg.PlanFromAppleProductID(strings.TrimSpace(payload.ProductId))
 	if planFromApple == "" || planFromApple != o.PlanID {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "apple_product_plan_mismatch"})
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "apple_product_plan_mismatch", "payment_verified": false})
 		return
 	}
+
+	verifiedExtra := appstoreiap.PaymentVerifiedFields(payload, tid)
 
 	prev, errLookup := s.Store.GetOrderByTransactionID(ctx, tid)
 	if errLookup != nil && !errors.Is(errLookup, sql.ErrNoRows) {
 		log.Printf("apple verify lookup transaction: %v", errLookup)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "db_failed", "payment_verified": false})
 		return
 	}
 	if errLookup == nil && prev != nil {
 		if prev.UserID != uid {
-			writeJSON(w, http.StatusConflict, map[string]string{"error": "transaction_conflict"})
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error": "transaction_conflict", "payment_verified": false,
+			})
 			return
 		}
 		if prev.ID != o.ID {
-			writeJSON(w, http.StatusConflict, map[string]string{"error": "duplicate_apple_transaction"})
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error": "duplicate_apple_transaction", "payment_verified": false,
+			})
 			return
 		}
 		if prev.Status == "paid" {
-			writeJSON(w, http.StatusOK, map[string]string{"status": "paid"})
+			writeJSON(w, http.StatusOK, mergeAppleVerifyOK("paid", verifiedExtra))
 			return
 		}
 	}
@@ -825,11 +865,13 @@ func (s *Server) handleAppleVerifyOrder(w http.ResponseWriter, r *http.Request, 
 		refreshed, err2 := s.Store.GetOrderByID(ctx, oid)
 		if err2 == nil && refreshed.Status == "paid" &&
 			refreshed.TransactionID.Valid && refreshed.TransactionID.String == tid {
-			writeJSON(w, http.StatusOK, map[string]string{"status": "paid"})
+			writeJSON(w, http.StatusOK, mergeAppleVerifyOK("paid", verifiedExtra))
 			return
 		}
 		log.Printf("apple mark paid: %v", err)
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "order_pay_state_conflict"})
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error": "order_pay_state_conflict", "payment_verified": false,
+		})
 		return
 	}
 	s.extendQingyuSubscriptionAfterPayment(ctx, o.UserID, o.PlanID, &store.MembershipRechargeRecordParams{
@@ -840,7 +882,7 @@ func (s *Server) handleAppleVerifyOrder(w http.ResponseWriter, r *http.Request, 
 		GatewayTransactionID: sql.NullString{String: tid, Valid: strings.TrimSpace(tid) != ""},
 		PlanID:               o.PlanID,
 	})
-	writeJSON(w, http.StatusOK, map[string]string{"status": "paid"})
+	writeJSON(w, http.StatusOK, mergeAppleVerifyOK("paid", verifiedExtra))
 }
 
 func (s *Server) handleWeChatPayNotify(w http.ResponseWriter, r *http.Request) {

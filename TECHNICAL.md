@@ -294,6 +294,7 @@ Apple verify 200：`status` 为 `paid`（或幂等时可为 `already_paid`）。
 | `WECHAT_APP_ID` / `WECHAT_APP_SECRET` | 微信开放平台应用 |
 | `HUAWEI_CLIENT_ID` / `HUAWEI_CLIENT_SECRET` / `HUAWEI_REDIRECT_URI` | 华为 OAuth |
 | `APPLE_CLIENT_ID` | Sign in with Apple 的 `aud` |
+| `APPLE_APP_SITE_ASSOCIATION_TEAM_ID` | iOS 通用链接：Apple 开发者 **Team ID**（10 位），与 `APPLE_IAP_BUNDLE_ID` 组成 AASA 的 `appID`；用于 `https://note.kymjs.com/wx/login/` 与微信 Universal Link |
 | `APPLE_IAP_BUNDLE_ID` | IAP JWS 校验用 Bundle ID（默认 `com.kymjs.note`） |
 | `APPLE_IAP_PRODUCT_MONTHLY` / `HALF_YEAR` / `YEARLY` | App Store 商品 ID，须与客户端、`plan_id` 映射一致 |
 | `APPLE_APP_STORE_APP_ID` | App Store Connect 中 App 的数字 Apple ID；正式环境 JWS 校验需要 |
