@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 )
@@ -68,4 +69,20 @@ func (s *Store) SetUserPasswordHash(ctx context.Context, userID int64, hash *str
 func (s *Store) DeleteUserByID(ctx context.Context, userID int64) error {
 	_, err := s.DB.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, userID)
 	return err
+}
+
+// ClearUserPhone 将账号资料手机号置空（用于从其他账号解绑手机号以便换绑到当前账号）。
+func (s *Store) ClearUserPhone(ctx context.Context, userID int64) error {
+	res, err := s.DB.ExecContext(ctx, `UPDATE users SET phone = NULL, updated_at = UTC_TIMESTAMP(3) WHERE id = ?`, userID)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }

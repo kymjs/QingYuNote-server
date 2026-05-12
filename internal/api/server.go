@@ -114,6 +114,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/me/merge/wechat", s.auth(s.handleMergeWechat))
 	mux.HandleFunc("POST /api/v1/me/merge/huawei", s.auth(s.handleMergeHuawei))
 	mux.HandleFunc("POST /api/v1/me/merge/apple", s.auth(s.handleMergeApple))
+	mux.HandleFunc("POST /api/v1/me/rebind/identity/confirm", s.auth(s.handleConfirmIdentityRebind))
 	mux.HandleFunc("GET /api/v1/me/subscription", s.auth(s.handleSubscription))
 	mux.HandleFunc("GET /api/v1/me/profile", s.auth(s.handleGetProfile))
 	mux.HandleFunc("POST /api/v1/me/redeem", s.auth(s.handleRedeem))
@@ -401,7 +402,8 @@ func (s *Server) handleLinkApple(w http.ResponseWriter, r *http.Request, uid int
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "true"})
 }
 
-// mergeOrLinkIdentity：凭据对应的身份尚未入库 → 等价于绑定；已指向当前用户 → noop；已指向另一用户 → 将对方账号并入当前 JWT 用户。
+// mergeOrLinkIdentity：凭据对应的身份尚未入库 → 绑定到当前用户；已指向当前用户 → noop；
+// 已指向另一用户 → 409 + rebind_ticket（客户端确认后 POST /api/v1/me/rebind/identity/confirm），不再合并或删除对方账号。
 func (s *Server) mergeOrLinkIdentity(w http.ResponseWriter, ctx context.Context, survivorID int64, provider, subject string) {
 	otherID, err := s.Store.LookupUserIDByIdentity(ctx, provider, subject)
 	if err != nil {
@@ -420,12 +422,17 @@ func (s *Server) mergeOrLinkIdentity(w http.ResponseWriter, ctx context.Context,
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "action": "noop"})
 		return
 	}
-	if err := s.Store.MergeUserAbsorb(ctx, survivorID, otherID); err != nil {
-		log.Printf("merge absorb failed survivor=%d source=%d: %v", survivorID, otherID, err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "merge_failed"})
+	tik, err := issueIdentityRebindTicket(s.Cfg.JWTSecret, provider, subject, survivorID)
+	if err != nil {
+		log.Printf("issueIdentityRebindTicket survivor=%d: %v", survivorID, err)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "rebind_ticket_unavailable"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "action": "merged", "absorbed_user_id": otherID})
+	writeJSON(w, http.StatusConflict, map[string]any{
+		"ok":            false,
+		"error":         "identity_owned_by_other",
+		"rebind_ticket": tik,
+	})
 }
 
 func (s *Server) handleMergeWechat(w http.ResponseWriter, r *http.Request, uid int64) {

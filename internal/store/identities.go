@@ -171,3 +171,68 @@ func (s *Store) IdentityBindings(ctx context.Context, userID int64) (wechat, hua
 	}
 	return wechat, huawei, apple, rows.Err()
 }
+
+func insertUserIdentityTx(ctx context.Context, tx *sql.Tx, userID int64, provider, subject string) error {
+	now := time.Now().UTC()
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO user_identities (user_id, provider, subject, created_at) VALUES (?, ?, ?, ?)`,
+		userID, provider, subject, now); err != nil {
+		return err
+	}
+	if provider == ProviderWechat {
+		_, err := tx.ExecContext(ctx, `UPDATE users SET wechat_openid = ?, updated_at = ? WHERE id = ?`, subject, now, userID)
+		return err
+	}
+	return nil
+}
+
+// TransferThirdPartyIdentity 将第三方身份从原绑定用户解绑并绑定到 toUserID（不合并订单/订阅、不删除用户）。
+func (s *Store) TransferThirdPartyIdentity(ctx context.Context, toUserID int64, provider, subject string) error {
+	provider = normalizeProv(provider)
+	subject = strings.TrimSpace(subject)
+	if provider == "" || subject == "" {
+		return errors.New("invalid_identity")
+	}
+
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var prevUID int64
+	err = tx.QueryRowContext(ctx,
+		`SELECT user_id FROM user_identities WHERE provider = ? AND subject = ? LIMIT 1`,
+		provider, subject).Scan(&prevUID)
+	if errors.Is(err, sql.ErrNoRows) {
+		if err := insertUserIdentityTx(ctx, tx, toUserID, provider, subject); err != nil {
+			return err
+		}
+		if err := syncWechatOpenIDColumnTx(ctx, tx, toUserID); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
+	if err != nil {
+		return err
+	}
+	if prevUID == toUserID {
+		return tx.Commit()
+	}
+
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM user_identities WHERE provider = ? AND subject = ?`,
+		provider, subject); err != nil {
+		return err
+	}
+	if err := syncWechatOpenIDColumnTx(ctx, tx, prevUID); err != nil {
+		return err
+	}
+	if err := insertUserIdentityTx(ctx, tx, toUserID, provider, subject); err != nil {
+		return err
+	}
+	if err := syncWechatOpenIDColumnTx(ctx, tx, toUserID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}

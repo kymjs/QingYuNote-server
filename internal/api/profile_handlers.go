@@ -101,6 +101,8 @@ type patchProfileReq struct {
 	ClearPassword  *bool   `json:"clear_password"`
 	// SmsVerifyCode 非空时，修改密码走短信核验（与阿里云 CheckSmsVerifyCode），不再要求 old_password。
 	SmsVerifyCode *string `json:"sms_verify_code"`
+	// UnbindPhoneFromOther 为 true 时：在已通过短信核验的前提下，若目标手机号已被其他账号占用，则先清空对方手机号再绑定到当前账号。
+	UnbindPhoneFromOther *bool `json:"unbind_phone_from_other"`
 }
 
 func (s *Server) handlePatchProfile(w http.ResponseWriter, r *http.Request, uid int64) {
@@ -123,6 +125,7 @@ func (s *Server) handlePatchProfile(w http.ResponseWriter, r *http.Request, uid 
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_body"})
 		return
 	}
+	var phoneForPatch *string
 
 	if req.Username != nil && strings.TrimSpace(ptrStr(req.Username)) == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "username_required"})
@@ -177,6 +180,27 @@ func (s *Server) handlePatchProfile(w http.ResponseWriter, r *http.Request, uid 
 				writeJSON(w, http.StatusForbidden, map[string]string{"error": "sms_code_invalid"})
 				return
 			}
+			other, err := s.Store.GetUserByPhone(ctx, trimmed)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
+				return
+			}
+			if err == nil && other.ID != uid {
+				if req.UnbindPhoneFromOther == nil || !*req.UnbindPhoneFromOther {
+					writeJSON(w, http.StatusConflict, map[string]string{"error": "phone_bound_to_other"})
+					return
+				}
+				if err := s.Store.ClearUserPhone(ctx, other.ID); err != nil {
+					if errors.Is(err, sql.ErrNoRows) {
+						writeJSON(w, http.StatusConflict, map[string]string{"error": "phone_rebind_race"})
+						return
+					}
+					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
+					return
+				}
+			}
+			d := newDigits
+			phoneForPatch = &d
 		} else {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "phone_required"})
 			return
@@ -243,7 +267,7 @@ func (s *Server) handlePatchProfile(w http.ResponseWriter, r *http.Request, uid 
 		}
 	}
 
-	if err := s.Store.PatchUserProfile(ctx, uid, req.Username, req.AvatarURL, req.Phone, req.Email); err != nil {
+	if err := s.Store.PatchUserProfile(ctx, uid, req.Username, req.AvatarURL, phoneForPatch, req.Email); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
 		return
 	}
