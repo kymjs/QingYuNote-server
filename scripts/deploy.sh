@@ -143,7 +143,7 @@ cmd_first_time() {
   log "       sudo ${SCRIPT_DIR}/deploy.sh migrate"
   log "     （按文件名排序执行 migrations/[0-9][0-9][0-9]_*.sql；详见 DEPLOYMENT.md）"
   log "  3) systemctl start ${SERVICE_NAME} && systemctl status ${SERVICE_NAME}"
-  log "  4) 配置 Nginx/Caddy 反代到 LISTEN_ADDR（默认 :9443）"
+  log "  4) 配置 Nginx/Caddy 反代到 LISTEN_ADDR（默认 :9443）；反代须传真实客户端 IP（X-Forwarded-For），否则公开短信频控的 IP 维度会失真（见 DEPLOYMENT.md 与 TECHNICAL.md 第 2.11 节）"
   log "  5) 签发兑换码（需在同一主机 source ${ENV_FILE} 或导出 MYSQL_DSN、REDEMPTION_ISSUE_SECRET）:"
   log "       ${ISSUE_TOOL_PATH} -plan monthly -count 1 -issuer-secret \"\$REDEMPTION_ISSUE_SECRET\""
   log ""

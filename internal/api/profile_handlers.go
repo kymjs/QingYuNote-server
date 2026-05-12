@@ -124,6 +124,11 @@ func (s *Server) handlePatchProfile(w http.ResponseWriter, r *http.Request, uid 
 		return
 	}
 
+	if req.Username != nil && strings.TrimSpace(ptrStr(req.Username)) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "username_required"})
+		return
+	}
+
 	passwordSet := u.PasswordHash.Valid && strings.TrimSpace(u.PasswordHash.String) != ""
 
 	newPw := ""
@@ -138,7 +143,7 @@ func (s *Server) handlePatchProfile(w http.ResponseWriter, r *http.Request, uid 
 		}
 	}
 
-	// 修改手机号：非空新号码用短信核验（目标号码）；清空号码用短信核验当前绑定号或原密码。
+	// 修改手机号：须为非空新号码，并用短信核验目标号码。
 	if req.Phone != nil {
 		trimmed := strings.TrimSpace(ptrStr(req.Phone))
 		if trimmed != "" {
@@ -173,83 +178,14 @@ func (s *Server) handlePatchProfile(w http.ResponseWriter, r *http.Request, uid 
 				return
 			}
 		} else {
-			hadPhone := u.Phone.Valid && strings.TrimSpace(u.Phone.String) != ""
-			if hadPhone {
-				smsCode := strings.TrimSpace(ptrStr(req.SmsVerifyCode))
-				old := strings.TrimSpace(ptrStr(req.OldPassword))
-				var verified bool
-				if s.Cfg.AliyunSMSConfigured() && smsCode != "" {
-					dbDigits := store.NormalizeLoginPhoneDigits(u.Phone.String)
-					if dbDigits == "" {
-						writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_phone"})
-						return
-					}
-					cli, err := aliyunsms.NewClient(s.Cfg.AliyunSMSRegion, s.Cfg.AliyunAccessKeyID, s.Cfg.AliyunAccessKeySecret)
-					if err != nil {
-						writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "sms_client_failed"})
-						return
-					}
-					params := aliyunsms.SMSParams{
-						SignName:      s.Cfg.AliyunSMSSignName,
-						TemplateCode:  s.Cfg.AliyunSMSTemplateCode,
-						SchemeName:    s.Cfg.AliyunSMSSchemeName,
-						TemplateParam: s.Cfg.AliyunSMSTemplateParam,
-					}
-					ok, err := aliyunsms.CheckVerifyCode(cli, params, dbDigits, smsCode)
-					verified = err == nil && ok
-				}
-				if !verified && passwordSet && old != "" {
-					if err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash.String), []byte(old)); err == nil {
-						verified = true
-					}
-				}
-				if !verified {
-					if !s.Cfg.AliyunSMSConfigured() && passwordSet {
-						if old == "" {
-							writeJSON(w, http.StatusBadRequest, map[string]string{"error": "old_password_required"})
-							return
-						}
-						writeJSON(w, http.StatusForbidden, map[string]string{"error": "old_password_invalid"})
-						return
-					}
-					if !s.Cfg.AliyunSMSConfigured() && !passwordSet {
-						writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "sms_not_configured"})
-						return
-					}
-					if smsCode != "" {
-						writeJSON(w, http.StatusForbidden, map[string]string{"error": "sms_code_invalid"})
-						return
-					}
-					if passwordSet && old != "" {
-						writeJSON(w, http.StatusForbidden, map[string]string{"error": "old_password_invalid"})
-						return
-					}
-					writeJSON(w, http.StatusBadRequest, map[string]string{"error": "sms_verify_code_required"})
-					return
-				}
-			}
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "phone_required"})
+			return
 		}
 	}
 
 	if req.ClearPassword != nil && *req.ClearPassword {
-		if !passwordSet {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "password_not_set"})
-			return
-		}
-		old := strings.TrimSpace(ptrStr(req.OldPassword))
-		if old == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "old_password_required"})
-			return
-		}
-		if err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash.String), []byte(old)); err != nil {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "old_password_invalid"})
-			return
-		}
-		if err := s.Store.SetUserPasswordHash(ctx, uid, nil); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
-			return
-		}
-		passwordSet = false
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "clear_password_not_allowed"})
+		return
 	}
 
 	if strings.TrimSpace(newPw) != "" {

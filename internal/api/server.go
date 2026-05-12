@@ -30,6 +30,7 @@ import (
 	"github.com/kymjs/noteapi/internal/huawei"
 	"github.com/kymjs/noteapi/internal/store"
 	"github.com/kymjs/noteapi/internal/subscription"
+	"github.com/kymjs/noteapi/internal/smsquota"
 	"github.com/kymjs/noteapi/internal/wechat"
 	"github.com/kymjs/noteapi/internal/wxnotify"
 	"github.com/kymjs/noteapi/internal/wxpay"
@@ -44,10 +45,17 @@ type Server struct {
 
 	notifyHandler *notify.Handler
 	qingyuGuard   *qingyuWebDAVGuard
+	// smsQuota 公开短信（注册 / 重置密码）发送频控：每 IP、每手机号、每设备 ID 滑动 24h 各最多 3 次；见 sms_public_quota.go 与 TECHNICAL.md §2.11。
+	smsQuota *smsquota.Window
 }
 
 func NewServer(cfg *config.Config, st *store.Store) (*Server, error) {
-	s := &Server{Cfg: cfg, Store: st, qingyuGuard: newQingyuWebDAVGuard()}
+	s := &Server{
+		Cfg:       cfg,
+		Store:     st,
+		qingyuGuard: newQingyuWebDAVGuard(),
+		smsQuota:  smsquota.New(smsPublicQuotaPerWindow, 24*time.Hour),
+	}
 	if cfg.WechatPayConfigured() {
 		priv, err := utils.LoadPrivateKeyWithPath(cfg.WechatPayPrivateKeyPath)
 		if err != nil {
@@ -97,6 +105,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/password/reset/check-phone", s.handlePasswordResetCheckPhone)
 	mux.HandleFunc("POST /api/v1/password/reset/sms/send", s.handleSendPasswordResetSms)
 	mux.HandleFunc("POST /api/v1/password/reset", s.handlePasswordResetConfirm)
+	mux.HandleFunc("POST /api/v1/register/captcha/new", s.handleRegisterCaptchaNew)
+	mux.HandleFunc("POST /api/v1/register/sms/send", s.handleSendRegisterSms)
+	mux.HandleFunc("POST /api/v1/register", s.handleRegisterConfirm)
 	mux.HandleFunc("POST /api/v1/me/link/wechat", s.auth(s.handleLinkWechat))
 	mux.HandleFunc("POST /api/v1/me/link/huawei", s.auth(s.handleLinkHuawei))
 	mux.HandleFunc("POST /api/v1/me/link/apple", s.auth(s.handleLinkApple))

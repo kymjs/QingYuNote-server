@@ -19,6 +19,7 @@
 | Apple | `internal/appleid/verify.go` | `identity_token` ES256 + JWKS |
 | 微信支付 | `internal/wxpay/appsign.go` 等 | APP 调起签名；回调验签见 `internal/wxnotify` |
 | 轻羽限流 | `internal/api/qingyu_guard.go` | `GET /qingyu/webdav` 每分钟限流 + 45s 缓存 |
+| 公开短信频控 | `internal/smsquota/window.go`、`internal/api/sms_public_quota.go` | 注册/重置密码发短信：每设备、每 IP、每手机号滑动 24h 各最多 3 次（进程内内存；多实例需外置存储） |
 | 用户头像 | `internal/api/avatar_handlers.go`、`internal/avatarwebdav/put.go` | `POST /me/avatar`：multipart 上传后经 WebDAV 写入 NAS，CDN URL 写入 `avatar_url` |
 
 进程内**无** Redis；会话仅靠 JWT。
@@ -164,6 +165,45 @@ Apple verify 200：`status` 为 `paid`（或幂等时可为 `already_paid`）。
 | POST | `/api/v1/webhooks/wechat/pay` | 微信签名（需配置平台证书与 APIv3 Key） |
 
 成功处理返回微信约定 JSON（含 `code":"SUCCESS"`）。未配置验签处理器时返回 503 `notify_not_configured`。
+
+### 2.11 公开短信（注册 / 重置密码）与进程内频控
+
+**适用接口**（均无需登录、走阿里云短信验证码；与已登录资料里改手机号 `POST /me/profile/phone/sms/send` 等**不是**同一套计数器）：
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/v1/password/reset/check-phone` | body：`{ "phone" }`；返回 `registered` bool |
+| POST | `/api/v1/password/reset/sms/send` | body：`{ "phone", "device_id?" }`；已向该号绑定用户发短信 |
+| POST | `/api/v1/register/captcha/new` | 取图形验证码；**不计入**下文短信条数 |
+| POST | `/api/v1/register/sms/send` | body：`{ "phone", "captcha_id", "captcha_code", "device_id?" }`；校验图形码后发短信 |
+| POST | `/api/v1/password/reset` | 核验短信后改密 |
+| POST | `/api/v1/register` | 核验短信后注册并签发 JWT |
+
+**设备标识（服务端统计「每设备」维度）**
+
+- 优先 HTTP 头 **`X-Device-Id`**（任意非空字符串，建议客户端 UUID，最长 128 字符）。
+- 否则读 body **`device_id`**（同上）。
+- 若二者皆空：用 **`sha256(客户端IP + "\n" + User-Agent)` 前 12 字节 hex**，前缀 `fb:`，作为弱设备指纹（同 NAT 下不同 UA 会分桶；仍弱于真设备 ID）。
+
+**客户端 IP**
+
+- 优先 **`X-Forwarded-For` 第一个逗号前的段**（反代需传真实链）；否则 `RemoteAddr` 的 host 部分。见 `internal/api/server.go` 的 `clientIP`。
+
+**频控规则（实现：`internal/smsquota.Window` + `api.tryReservePublicSMSQuota`）**
+
+- **滑动时间窗**：默认 **24 小时**（`NewServer` 内 `smsquota.New(3, 24*time.Hour)`）。
+- **每个维度独立计数、上限各 3 次**：一次成功「占位」会在三个 key 上各记 1 条时间戳：
+  - `sms24:ip:<clientIP>`
+  - `sms24:phone:<规范化 11 位手机号>`（与 `store.NormalizeLoginPhoneDigits` 一致）
+  - `sms24:dev:<normalizeSMSDeviceID 结果>`
+- **注册与重置密码共用同一套 key 前缀**：同一手机号在 24h 内无论走注册还是重置，**phone 维度**累计；**ip / dev** 维度同理（防止换接口刷短信）。
+- **占位与回滚**：调用阿里云**之前** `BeginSend` 占位；若阿里云返回错误则 **`undo()`** 回滚本次在三轴上的占位，避免失败仍吃额度。
+- **超限响应**：HTTP **429**，`{"error":"sms_quota_exceeded"}`。产品文案应对用户弱化（勿写「每 IP / 每设备 / 3 次」等），见 Flutter/Harmony 对 `sms_quota_exceeded` 的映射。
+
+**运维注意**
+
+- 计数仅存**本进程内存**；水平多副本时每实例各有一份配额，等效上限会放宽；若要严格全局需 Redis 等。
+- 调整上限/窗口：改 `internal/api/sms_public_quota.go` 中 `smsPublicQuotaPerWindow` 与 `NewServer` 里 `24*time.Hour`。
 
 ---
 

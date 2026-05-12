@@ -22,7 +22,8 @@ type passwordResetCheckResp struct {
 }
 
 type passwordResetSmsReq struct {
-	Phone string `json:"phone"`
+	Phone    string `json:"phone"`
+	DeviceID string `json:"device_id"` // 可选；与 X-Device-Id 一起供公开短信频控 dev 维度，见 TECHNICAL.md §2.11
 }
 
 type passwordResetConfirmReq struct {
@@ -79,6 +80,7 @@ func (s *Server) handlePasswordResetCheckPhone(w http.ResponseWriter, r *http.Re
 
 // handleSendPasswordResetSms POST /api/v1/password/reset/sms/send
 // 无需登录：若手机号已绑定账号则发送重置密码验证码。
+// 频控：在调用阿里云前 tryReservePublicSMSQuota（三轴 ip/phone/device，滑动 24h 各 3 次）；发送失败 undo。详见 TECHNICAL.md §2.11。
 func (s *Server) handleSendPasswordResetSms(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, `{"error":"method_not_allowed"}`, http.StatusMethodNotAllowed)
@@ -117,7 +119,12 @@ func (s *Server) handleSendPasswordResetSms(w http.ResponseWriter, r *http.Reque
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no_account"})
 		return
 	}
+	undo, ok := s.tryReservePublicSMSQuota(w, r, digits, req.DeviceID)
+	if !ok {
+		return
+	}
 	if err := s.sendPasswordVerifySMS(dbDigits); err != nil {
+		undo()
 		apiErr, detail := aliyunsms.ClassifySendError(err)
 		log.Printf("password reset sms send digits=%s: %s", digits, detail)
 		status := http.StatusBadGateway
