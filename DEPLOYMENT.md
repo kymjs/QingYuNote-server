@@ -46,6 +46,7 @@
    - `migrations/001_init.sql`
    - `migrations/002_user_identities.sql`
    - `migrations/003_user_profile.sql`（用户资料列；与其它迁移一样可通过 `deploy.sh migrate` 执行）
+   - `migrations/004_redemption_codes.sql`、`migrations/005_membership_recharge_records.sql`（兑换码表、会籍充值审计表；`migrate` 会一并按序执行）
 4. **配置环境变量**：复制 `server/.env.example` 为机器上的机密文件（例如 `/etc/noteapi.env`），填写 `MYSQL_DSN`、`JWT_SECRET`、各业务变量。
 5. **编译**：在 `server` 目录执行 `go build -o /usr/local/bin/noteapi ./cmd/noteapi`（路径可自定）。
 6. **systemd**：使用 `scripts/noteapi.service` 模板，把 `EnvironmentFile` 指向上面的 env 文件，`ExecStart` 指向二进制与监听地址。
@@ -63,7 +64,7 @@
 
 1. 拉取最新代码（或上传新压缩包解压）。
 2. **若有新的 SQL 迁移**：在维护窗口先备份数据库（见下文「回滚」），再执行迁移，最后再起新版本二进制。
-   - 一键：`sudo ./scripts/deploy.sh migrate`（按 `deploy.local.env` 连接数据库，顺序执行 `001`～`004`，含兑换码表）。
+   - 一键：`sudo ./scripts/deploy.sh migrate`（按 `deploy.local.env` 连接数据库，顺序执行 `migrations/[0-9][0-9][0-9]_*.sql`，含 `004` 兑换码与 `005` 会籍充值审计表）。
    - `001`、`002` 本身具备幂等或可重复特性；**`003_user_profile.sql` 通过检测列是否已存在跳过重复 `ALTER`**，已在运行且库里已有数据的实例也可安全执行（重复执行不会报错）。
    - 若你只上线过旧二进制、从未执行过 `003`，发布含「个人信息」的版本前**必须先跑完 `003`**，再重启服务，否则读写资料相关接口会缺列。
 3. **若环境变量有新增项**：更新 `/etc/noteapi.env`（按 `server/.env.example` 逐项核对；例如用户头像依赖 **`AVATAR_WEBDAV_*`** 与 **`AVATAR_PUBLIC_BASE_URL`**（详见 `TECHNICAL.md` §2.7）；App Store 内购依赖 **`APPLE_IAP_*`**、**`APPLE_APP_STORE_APP_ID`**）。**公开短信进程内频控**不引入新的 env 键；上线后只需确认反代 **`X-Forwarded-For`** 与多实例行为（见上文「反向代理」小条与 `TECHNICAL.md` 第 2.11 节）。
@@ -96,7 +97,7 @@ nano scripts/deploy.local.env   # 填写 MYSQL_HOST / MYSQL_USER / MYSQL_PASSWOR
 **`deploy.sh` 子命令**：
 
 - `first-time`：安装常用依赖、创建部署目录、编译、安装 systemd（需 root）。
-- `migrate`：按 `deploy.local.env` 中的 **`MYSQL_*`** 顺序执行 `migrations/001`～`004`（需本机已安装 `mysql-client`）。
+- `migrate`：按 `deploy.local.env` 中的 **`MYSQL_*`** 顺序执行 `migrations/[0-9][0-9][0-9]_*.sql`（需本机已安装 `mysql-client`）。
 - `update`：`git pull`（可选）、编译、重启 `noteapi`（需 root）。
 
 仍可通过环境变量覆盖 **`DEPLOY_ROOT`**、**`ENV_FILE`** 等。

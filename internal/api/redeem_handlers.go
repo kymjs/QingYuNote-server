@@ -1,12 +1,15 @@
 package api
 
 import (
+	"database/sql"
 	"errors"
+	"log"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/kymjs/noteapi/internal/redemption"
+	"github.com/kymjs/noteapi/internal/store"
 )
 
 type redeemReq struct {
@@ -47,6 +50,14 @@ func (s *Server) handleRedeem(w http.ResponseWriter, r *http.Request, uid int64)
 		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
 		return
+	}
+	if err := s.Store.InsertMembershipRechargeRecord(ctx, &store.MembershipRechargeRecordParams{
+		UserID:             uid,
+		Channel:            "redeem",
+		RedemptionCodeHash: sql.NullString{String: hash, Valid: true},
+		PlanID:             plan,
+	}); err != nil {
+		log.Printf("membership recharge audit (redeem): %v", err)
 	}
 	s.qingyuGuard.invalidate(uid)
 	writeJSON(w, http.StatusOK, redeemResp{PlanID: plan})

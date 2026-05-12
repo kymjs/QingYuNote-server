@@ -710,7 +710,7 @@ type appleVerifyReq struct {
 	SignedTransaction string `json:"signed_transaction"`
 }
 
-func (s *Server) extendQingyuSubscriptionAfterPayment(ctx context.Context, userID int64, planID string) {
+func (s *Server) extendQingyuSubscriptionAfterPayment(ctx context.Context, userID int64, planID string, audit *store.MembershipRechargeRecordParams) {
 	sub, errSub := s.Store.GetSubscription(ctx, userID)
 	if errSub != nil && !errors.Is(errSub, sql.ErrNoRows) {
 		log.Printf("subscription read after payment: %v", errSub)
@@ -726,6 +726,11 @@ func (s *Server) extendQingyuSubscriptionAfterPayment(ctx context.Context, userI
 		_ = s.Store.UpsertSubscriptionExpiry(ctx, userID, newExp, false)
 	}
 	s.qingyuGuard.invalidate(userID)
+	if audit != nil {
+		if err := s.Store.InsertMembershipRechargeRecord(ctx, audit); err != nil {
+			log.Printf("membership recharge audit: %v", err)
+		}
+	}
 }
 
 func (s *Server) handleAppleVerifyOrder(w http.ResponseWriter, r *http.Request, uid int64) {
@@ -820,7 +825,14 @@ func (s *Server) handleAppleVerifyOrder(w http.ResponseWriter, r *http.Request, 
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "order_pay_state_conflict"})
 		return
 	}
-	s.extendQingyuSubscriptionAfterPayment(ctx, o.UserID, o.PlanID)
+	s.extendQingyuSubscriptionAfterPayment(ctx, o.UserID, o.PlanID, &store.MembershipRechargeRecordParams{
+		UserID:               o.UserID,
+		Channel:              "apple",
+		OrderID:              sql.NullInt64{Int64: o.ID, Valid: true},
+		OutTradeNo:           sql.NullString{String: o.OutTradeNo, Valid: strings.TrimSpace(o.OutTradeNo) != ""},
+		GatewayTransactionID: sql.NullString{String: tid, Valid: strings.TrimSpace(tid) != ""},
+		PlanID:               o.PlanID,
+	})
 	writeJSON(w, http.StatusOK, map[string]string{"status": "paid"})
 }
 
@@ -869,7 +881,14 @@ func (s *Server) handleWeChatPayNotify(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"code": "SUCCESS", "message": "OK"})
 		return
 	}
-	s.extendQingyuSubscriptionAfterPayment(ctx, dbo.UserID, dbo.PlanID)
+	s.extendQingyuSubscriptionAfterPayment(ctx, dbo.UserID, dbo.PlanID, &store.MembershipRechargeRecordParams{
+		UserID:               dbo.UserID,
+		Channel:              "wechat",
+		OrderID:              sql.NullInt64{Int64: dbo.ID, Valid: true},
+		OutTradeNo:           sql.NullString{String: dbo.OutTradeNo, Valid: strings.TrimSpace(dbo.OutTradeNo) != ""},
+		GatewayTransactionID: sql.NullString{String: tid, Valid: strings.TrimSpace(tid) != ""},
+		PlanID:               dbo.PlanID,
+	})
 	writeJSON(w, http.StatusOK, map[string]string{"code": "SUCCESS", "message": "OK"})
 }
 
