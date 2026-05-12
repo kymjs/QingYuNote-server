@@ -133,7 +133,7 @@ func (s *Server) Routes() http.Handler {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-	// iOS 微信 Universal Link：https://note.kymjs.com/wx/login/（同域须反代至本服务，见 DEPLOYMENT.md）
+	// iOS 微信 Universal Link：https://noteapi.kymjs.com/wx/login/（见 DEPLOYMENT.md §2.1）
 	mux.HandleFunc("GET /.well-known/apple-app-site-association", s.handleAppleAppSiteAssociation)
 	mux.HandleFunc("GET /apple-app-site-association", s.handleAppleAppSiteAssociation)
 	mux.HandleFunc("GET /wx/login/", s.handleWXUniversalLinkLanding)

@@ -7,8 +7,8 @@ import (
 	"strings"
 )
 
-// handleAppleAppSiteAssociation 供 iOS / 微信 Universal Link 校验：须由 https://note.kymjs.com 反代到本服务
-//（或同域部署）。依赖 APPLE_APP_SITE_ASSOCIATION_TEAM_ID（Apple 开发者 10 位 Team ID）。
+// handleAppleAppSiteAssociation 供 iOS / 微信 Universal Link 校验：默认由 https://noteapi.kymjs.com 反代至本进程
+//（与 PUBLIC_BASE_URL 同域时路径即生效）。依赖 APPLE_APP_SITE_ASSOCIATION_TEAM_ID（Apple 开发者 10 位 Team ID）。
 func (s *Server) handleAppleAppSiteAssociation(w http.ResponseWriter, r *http.Request) {
 	team := strings.TrimSpace(s.Cfg.AppleAppSiteAssociationTeamID)
 	bundle := strings.TrimSpace(s.Cfg.AppleIAPBundleID)
