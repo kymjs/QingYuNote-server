@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"crypto/rand"
-	"crypto/rsa"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
@@ -12,16 +11,8 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"os"
 	"strings"
 	"time"
-
-	"github.com/wechatpay-apiv3/wechatpay-go/core"
-	"github.com/wechatpay-apiv3/wechatpay-go/core/notify"
-	"github.com/wechatpay-apiv3/wechatpay-go/core/option"
-	"github.com/wechatpay-apiv3/wechatpay-go/services/payments"
-	"github.com/wechatpay-apiv3/wechatpay-go/services/payments/app"
-	"github.com/wechatpay-apiv3/wechatpay-go/utils"
 
 	"github.com/kymjs/noteapi/internal/appleid"
 	"github.com/kymjs/noteapi/internal/appstoreiap"
@@ -32,19 +23,13 @@ import (
 	"github.com/kymjs/noteapi/internal/store"
 	"github.com/kymjs/noteapi/internal/subscription"
 	"github.com/kymjs/noteapi/internal/wechat"
-	"github.com/kymjs/noteapi/internal/wxnotify"
-	"github.com/kymjs/noteapi/internal/wxpay"
 	"golang.org/x/crypto/bcrypt"
 )
 
 type Server struct {
-	Cfg       *config.Config
-	Store     *store.Store
-	PayClient *core.Client
-	PayPriv   *rsa.PrivateKey
-
-	notifyHandler *notify.Handler
-	qingyuGuard   *qingyuWebDAVGuard
+	Cfg         *config.Config
+	Store       *store.Store
+	qingyuGuard *qingyuWebDAVGuard
 	// smsQuota 公开短信（注册 / 重置密码）发送频控：每 IP、每手机号、每设备 ID 滑动 24h 各最多 3 次；见 sms_public_quota.go 与 TECHNICAL.md §2.11。
 	smsQuota *smsquota.Window
 }
@@ -55,43 +40,6 @@ func NewServer(cfg *config.Config, st *store.Store) (*Server, error) {
 		Store:       st,
 		qingyuGuard: newQingyuWebDAVGuard(),
 		smsQuota:    smsquota.New(smsPublicQuotaPerWindow, 24*time.Hour),
-	}
-	if cfg.WechatPayConfigured() {
-		priv, err := utils.LoadPrivateKeyWithPath(cfg.WechatPayPrivateKeyPath)
-		if err != nil {
-			return nil, fmt.Errorf("load merchant private key: %w", err)
-		}
-		s.PayPriv = priv
-		ctx := context.Background()
-		opts := []core.ClientOption{
-			option.WithWechatPayAutoAuthCipher(
-				cfg.WechatPayMchID,
-				cfg.WechatPayCertSerial,
-				priv,
-				cfg.WechatPayAPIv3Key,
-			),
-		}
-		client, err := core.NewClient(ctx, opts...)
-		if err != nil {
-			return nil, err
-		}
-		s.PayClient = client
-		p := strings.TrimSpace(os.Getenv("WECHAT_PAY_PLATFORM_CERT_PEM_PATH"))
-		if p != "" {
-			v, err := wxnotify.LoadVerifierFromPEMFile(p)
-			if err != nil {
-				log.Printf("warning: WECHAT_PAY_PLATFORM_CERT_PEM_PATH: %v — notify disabled", err)
-			} else {
-				h, err := notify.NewRSANotifyHandler(cfg.WechatPayAPIv3Key, v)
-				if err != nil {
-					log.Printf("warning: notify handler: %v", err)
-				} else {
-					s.notifyHandler = h
-				}
-			}
-		} else {
-			log.Printf("warning: WECHAT_PAY_PLATFORM_CERT_PEM_PATH unset — payment notify verification disabled until configured")
-		}
 	}
 	return s, nil
 }
@@ -125,10 +73,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("DELETE /api/v1/me", s.auth(s.handleDeleteAccount))
 	mux.HandleFunc("GET /api/v1/qingyu/webdav", s.auth(s.handleQingyuWebDAV))
 	mux.HandleFunc("POST /api/v1/orders", s.auth(s.handleCreateOrder))
-	mux.HandleFunc("POST /api/v1/orders/{id}/wechat/prepay", s.auth(s.handleWeChatPrepay))
 	mux.HandleFunc("POST /api/v1/orders/{id}/apple/verify", s.auth(s.handleAppleVerifyOrder))
 	mux.HandleFunc("GET /api/v1/orders/{id}", s.auth(s.handleGetOrder))
-	mux.HandleFunc("POST /api/v1/webhooks/wechat/pay", s.handleWeChatPayNotify)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
@@ -614,93 +560,6 @@ func (s *Server) handleCreateOrder(w http.ResponseWriter, r *http.Request, uid i
 	})
 }
 
-type prepayResp struct {
-	AppID     string `json:"app_id"`
-	PartnerID string `json:"partner_id"`
-	PrepayID  string `json:"prepay_id"`
-	Package   string `json:"package"`
-	NonceStr  string `json:"nonce_str"`
-	TimeStamp string `json:"timestamp"`
-	Sign      string `json:"sign"`
-	SignType  string `json:"sign_type"`
-}
-
-func (s *Server) handleWeChatPrepay(w http.ResponseWriter, r *http.Request, uid int64) {
-	if !s.Cfg.WechatPayConfigured() || s.PayClient == nil || s.PayPriv == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
-			"error":   "wechat_pay_not_configured",
-			"message": "微信支付商户参数未配置，请稍后在服务端填写商户号与证书",
-		})
-		return
-	}
-	idStr := r.PathValue("id")
-	oid := config.ParseOrderIDParam(idStr)
-	if oid <= 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_order"})
-		return
-	}
-	ctx := r.Context()
-	o, err := s.Store.GetOrderByID(ctx, oid)
-	if err != nil || o.UserID != uid {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "order_not_found"})
-		return
-	}
-	if o.Status != "pending" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "order_not_payable"})
-		return
-	}
-	ip := clientIP(r)
-	if ip == "" {
-		ip = "127.0.0.1"
-	}
-	tot := int64(o.AmountTotal)
-	svc := app.AppApiService{Client: s.PayClient}
-	desc := fmt.Sprintf("轻羽云服务-%s", o.PlanID)
-	req := app.PrepayRequest{
-		Appid:       core.String(s.Cfg.WechatAppID),
-		Mchid:       core.String(s.Cfg.WechatPayMchID),
-		Description: core.String(desc),
-		OutTradeNo:  core.String(o.OutTradeNo),
-		NotifyUrl:   core.String(s.Cfg.NotifyURL()),
-		Amount: &app.Amount{
-			Total:    &tot,
-			Currency: core.String("CNY"),
-		},
-		SceneInfo: &app.SceneInfo{
-			PayerClientIp: core.String(ip),
-		},
-	}
-	resp, _, err := svc.Prepay(ctx, req)
-	if err != nil {
-		log.Printf("prepay: %v", err)
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "wechat_prepay_failed", "message": err.Error()})
-		return
-	}
-	prepayID := ""
-	if resp != nil && resp.PrepayId != nil {
-		prepayID = *resp.PrepayId
-	}
-	if prepayID == "" {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "empty_prepay_id"})
-		return
-	}
-	ts, nonce, sign, err := wxpay.AppInvokeSign(s.Cfg.WechatAppID, prepayID, s.PayPriv)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "sign_failed"})
-		return
-	}
-	writeJSON(w, http.StatusOK, prepayResp{
-		AppID:     s.Cfg.WechatAppID,
-		PartnerID: s.Cfg.WechatPayMchID,
-		PrepayID:  prepayID,
-		Package:   "Sign=WXPay",
-		NonceStr:  nonce,
-		TimeStamp: ts,
-		Sign:      sign,
-		SignType:  "RSA",
-	})
-}
-
 func (s *Server) handleGetOrder(w http.ResponseWriter, r *http.Request, uid int64) {
 	oid := config.ParseOrderIDParam(r.PathValue("id"))
 	if oid <= 0 {
@@ -883,62 +742,6 @@ func (s *Server) handleAppleVerifyOrder(w http.ResponseWriter, r *http.Request, 
 		PlanID:               o.PlanID,
 	})
 	writeJSON(w, http.StatusOK, mergeAppleVerifyOK("paid", verifiedExtra))
-}
-
-func (s *Server) handleWeChatPayNotify(w http.ResponseWriter, r *http.Request) {
-	if s.notifyHandler == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "notify_not_configured"})
-		return
-	}
-	ctx := r.Context()
-	tx := new(payments.Transaction)
-	nreq, err := s.notifyHandler.ParseNotifyRequest(ctx, r, tx)
-	if err != nil {
-		log.Printf("notify parse: %v", err)
-		writeJSON(w, http.StatusBadRequest, map[string]string{"code": "FAIL", "message": err.Error()})
-		return
-	}
-	_ = nreq
-	if tx.OutTradeNo == nil || tx.TransactionId == nil || tx.TradeState == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"code": "FAIL", "message": "bad_payload"})
-		return
-	}
-	if *tx.TradeState != "SUCCESS" {
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-	out := *tx.OutTradeNo
-	tid := *tx.TransactionId
-
-	dbo, err := s.Store.GetOrderByOutTradeNo(ctx, out)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			log.Printf("notify: unknown out_trade_no=%s", out)
-		} else {
-			log.Printf("notify: order lookup %s: %v", out, err)
-		}
-		writeJSON(w, http.StatusOK, map[string]string{"code": "SUCCESS", "message": "OK"})
-		return
-	}
-	if tx.Amount != nil && tx.Amount.Total != nil && int(*tx.Amount.Total) != dbo.AmountTotal {
-		log.Printf("notify: amount mismatch order=%s", out)
-		writeJSON(w, http.StatusBadRequest, map[string]string{"code": "FAIL", "message": "amount"})
-		return
-	}
-	if err := s.Store.MarkOrderPaid(ctx, out, tid); err != nil {
-		log.Printf("notify mark paid (maybe duplicate): %v", err)
-		writeJSON(w, http.StatusOK, map[string]string{"code": "SUCCESS", "message": "OK"})
-		return
-	}
-	s.extendQingyuSubscriptionAfterPayment(ctx, dbo.UserID, dbo.PlanID, &store.MembershipRechargeRecordParams{
-		UserID:               dbo.UserID,
-		Channel:              "wechat",
-		OrderID:              sql.NullInt64{Int64: dbo.ID, Valid: true},
-		OutTradeNo:           sql.NullString{String: dbo.OutTradeNo, Valid: strings.TrimSpace(dbo.OutTradeNo) != ""},
-		GatewayTransactionID: sql.NullString{String: tid, Valid: strings.TrimSpace(tid) != ""},
-		PlanID:               dbo.PlanID,
-	})
-	writeJSON(w, http.StatusOK, map[string]string{"code": "SUCCESS", "message": "OK"})
 }
 
 func clientIP(r *http.Request) string {

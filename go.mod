@@ -8,7 +8,6 @@ require (
 	github.com/go-sql-driver/mysql v1.8.1
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/laishere/app-store-server-library-go v0.2.1
-	github.com/wechatpay-apiv3/wechatpay-go v0.2.20
 	golang.org/x/crypto v0.48.0
 )
 

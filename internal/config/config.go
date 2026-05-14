@@ -48,13 +48,6 @@ type Config struct {
 
 	PublicBaseURL string
 
-	WechatPayMchID          string
-	WechatPayCertSerial     string
-	WechatPayPrivateKeyPath string
-	WechatPayAPIv3Key       string
-
-	WechatPayNotifyPath string
-
 	// 阿里云号码认证（短信验证码）：修改密码等场景 SendSmsVerifyCode / CheckSmsVerifyCode。
 	AliyunAccessKeyID     string
 	AliyunAccessKeySecret string
@@ -111,13 +104,6 @@ func Load() *Config {
 
 		PublicBaseURL: strings.TrimRight(getenv("PUBLIC_BASE_URL", "https://noteapi.kymjs.com"), "/"),
 
-		WechatPayMchID:          getenv("WECHAT_PAY_MCH_ID", ""),
-		WechatPayCertSerial:     getenv("WECHAT_PAY_CERT_SERIAL", ""),
-		WechatPayPrivateKeyPath: getenv("WECHAT_PAY_PRIVATE_KEY_PATH", ""),
-		WechatPayAPIv3Key:       getenv("WECHAT_PAY_API_V3_KEY", ""),
-
-		WechatPayNotifyPath: getenv("WECHAT_PAY_NOTIFY_PATH", "/api/v1/webhooks/wechat/pay"),
-
 		AliyunAccessKeyID:      getenv("ALIYUN_ACCESS_KEY_ID", ""),
 		AliyunAccessKeySecret:  getenv("ALIYUN_ACCESS_KEY_SECRET", ""),
 		AliyunSMSRegion:        getenv("ALIYUN_SMS_REGION", "cn-hangzhou"),
@@ -145,13 +131,6 @@ func Load() *Config {
 		}
 	}
 	return c
-}
-
-func (c *Config) WechatPayConfigured() bool {
-	return c.WechatPayMchID != "" &&
-		c.WechatPayCertSerial != "" &&
-		c.WechatPayPrivateKeyPath != "" &&
-		c.WechatPayAPIv3Key != ""
 }
 
 // QingyuWebDAVConfigured 为 true 时方可向下发 NAS 端点与账号（password 仅运行时存在于进程中）。
@@ -192,10 +171,6 @@ func (c *Config) AppleClientIDs() []string {
 		}
 	}
 	return out
-}
-
-func (c *Config) NotifyURL() string {
-	return c.PublicBaseURL + c.WechatPayNotifyPath
 }
 
 // AppleIAPVerifyConfigured 为 true 时允许校验苹果内购 JWS（Bundle ID 与各档位商品 ID 已配置）。
