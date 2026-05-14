@@ -19,6 +19,7 @@ import (
 	"github.com/kymjs/noteapi/internal/auth"
 	"github.com/kymjs/noteapi/internal/config"
 	"github.com/kymjs/noteapi/internal/huawei"
+	"github.com/kymjs/noteapi/internal/huaweiiap"
 	"github.com/kymjs/noteapi/internal/smsquota"
 	"github.com/kymjs/noteapi/internal/store"
 	"github.com/kymjs/noteapi/internal/subscription"
@@ -74,6 +75,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/qingyu/webdav", s.auth(s.handleQingyuWebDAV))
 	mux.HandleFunc("POST /api/v1/orders", s.auth(s.handleCreateOrder))
 	mux.HandleFunc("POST /api/v1/orders/{id}/apple/verify", s.auth(s.handleAppleVerifyOrder))
+	mux.HandleFunc("POST /api/v1/orders/{id}/huawei/verify", s.auth(s.handleHuaweiVerifyOrder))
 	mux.HandleFunc("GET /api/v1/orders/{id}", s.auth(s.handleGetOrder))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -530,11 +532,12 @@ type createOrderReq struct {
 }
 
 type orderWire struct {
-	ID          int64  `json:"id"`
-	OutTradeNo  string `json:"out_trade_no"`
-	PlanID      string `json:"plan_id"`
-	AmountTotal int    `json:"amount_total"`
-	Status      string `json:"status"`
+	ID                     int64  `json:"id"`
+	OutTradeNo             string `json:"out_trade_no"`
+	PlanID                 string `json:"plan_id"`
+	AmountTotal            int    `json:"amount_total"`
+	Status                 string `json:"status"`
+	GatewayTransactionID   string `json:"gateway_transaction_id,omitempty"` // 支付成功后：苹果 transactionId / 华为 orderId
 }
 
 func (s *Server) handleCreateOrder(w http.ResponseWriter, r *http.Request, uid int64) {
@@ -572,8 +575,13 @@ func (s *Server) handleGetOrder(w http.ResponseWriter, r *http.Request, uid int6
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "order_not_found"})
 		return
 	}
+	gw := ""
+	if o.TransactionID.Valid {
+		gw = strings.TrimSpace(o.TransactionID.String)
+	}
 	writeJSON(w, http.StatusOK, orderWire{
 		ID: o.ID, OutTradeNo: o.OutTradeNo, PlanID: o.PlanID, AmountTotal: o.AmountTotal, Status: o.Status,
+		GatewayTransactionID: gw,
 	})
 }
 
@@ -742,6 +750,148 @@ func (s *Server) handleAppleVerifyOrder(w http.ResponseWriter, r *http.Request, 
 		PlanID:               o.PlanID,
 	})
 	writeJSON(w, http.StatusOK, mergeAppleVerifyOK("paid", verifiedExtra))
+}
+
+type huaweiVerifyReq struct {
+	PurchaseToken string `json:"purchase_token"`
+	ProductID     string `json:"product_id"`
+	AccountFlag   int64  `json:"account_flag"`
+}
+
+func mergeHuaweiVerifyOK(status string, huaweiOrderID string) map[string]any {
+	out := map[string]any{"status": status, "payment_verified": true}
+	if strings.TrimSpace(huaweiOrderID) != "" {
+		out["huawei_order_id"] = strings.TrimSpace(huaweiOrderID)
+	}
+	return out
+}
+
+func (s *Server) handleHuaweiVerifyOrder(w http.ResponseWriter, r *http.Request, uid int64) {
+	if !s.Cfg.HuaweiIAPVerifyConfigured() {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"error":              "huawei_iap_not_configured",
+			"message":            "服务端未配置 HUAWEI_IAP_CLIENT_ID / HUAWEI_IAP_CLIENT_SECRET / HUAWEI_IAP_PRODUCT_*",
+			"payment_verified":   false,
+		})
+		return
+	}
+	oid := config.ParseOrderIDParam(r.PathValue("id"))
+	if oid <= 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_order", "payment_verified": false})
+		return
+	}
+	var req huaweiVerifyReq
+	if err := readJSON(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_body", "payment_verified": false})
+		return
+	}
+	purchaseToken := strings.TrimSpace(req.PurchaseToken)
+	productID := strings.TrimSpace(req.ProductID)
+	if purchaseToken == "" || productID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "missing_purchase_token_or_product_id", "payment_verified": false})
+		return
+	}
+	ctx := r.Context()
+	o, err := s.Store.GetOrderByID(ctx, oid)
+	if err != nil || o.UserID != uid {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "order_not_found", "payment_verified": false})
+		return
+	}
+	if o.Status != "pending" {
+		if o.Status == "paid" {
+			gw := ""
+			if o.TransactionID.Valid {
+				gw = strings.TrimSpace(o.TransactionID.String)
+			}
+			writeJSON(w, http.StatusOK, mergeHuaweiVerifyOK("already_paid", gw))
+			return
+		}
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "order_not_payable", "payment_verified": false})
+		return
+	}
+	planFromClient := s.Cfg.PlanFromHuaweiProductID(productID)
+	if planFromClient == "" || planFromClient != o.PlanID {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "huawei_product_plan_mismatch", "payment_verified": false})
+		return
+	}
+
+	hclient := huaweiiap.New(s.Cfg.HuaweiIAPClientID, s.Cfg.HuaweiIAPClientSecret, s.Cfg.HuaweiIAPOrderSiteURL)
+	data, err := hclient.VerifyPurchaseToken(ctx, req.AccountFlag, purchaseToken, productID)
+	if err != nil {
+		log.Printf("huawei iap verify: %v", err)
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"error": "huawei_verify_failed", "message": err.Error(), "payment_verified": false,
+		})
+		return
+	}
+	if err := huaweiiap.ValidateForCredit(data, s.Cfg.HuaweiIAPPackageName, productID); err != nil {
+		code := "huawei_purchase_invalid"
+		if errors.Is(err, huaweiiap.ErrNotPurchased) {
+			code = "huawei_purchase_not_paid"
+		}
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"error": code, "message": err.Error(), "payment_verified": false,
+		})
+		return
+	}
+	planFromHuawei := s.Cfg.PlanFromHuaweiProductID(strings.TrimSpace(data.ProductID))
+	if planFromHuawei == "" || planFromHuawei != o.PlanID {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "huawei_payload_plan_mismatch", "payment_verified": false})
+		return
+	}
+	tid := strings.TrimSpace(data.OrderID)
+	if tid == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "missing_huawei_order_id", "payment_verified": false})
+		return
+	}
+
+	prev, errLookup := s.Store.GetOrderByTransactionID(ctx, tid)
+	if errLookup != nil && !errors.Is(errLookup, sql.ErrNoRows) {
+		log.Printf("huawei verify lookup transaction: %v", errLookup)
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "db_failed", "payment_verified": false})
+		return
+	}
+	if errLookup == nil && prev != nil {
+		if prev.UserID != uid {
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error": "transaction_conflict", "payment_verified": false,
+			})
+			return
+		}
+		if prev.ID != o.ID {
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error": "duplicate_huawei_order", "payment_verified": false,
+			})
+			return
+		}
+		if prev.Status == "paid" {
+			writeJSON(w, http.StatusOK, mergeHuaweiVerifyOK("paid", tid))
+			return
+		}
+	}
+
+	if err := s.Store.MarkOrderPaid(ctx, o.OutTradeNo, tid); err != nil {
+		refreshed, err2 := s.Store.GetOrderByID(ctx, oid)
+		if err2 == nil && refreshed.Status == "paid" &&
+			refreshed.TransactionID.Valid && refreshed.TransactionID.String == tid {
+			writeJSON(w, http.StatusOK, mergeHuaweiVerifyOK("paid", tid))
+			return
+		}
+		log.Printf("huawei mark paid: %v", err)
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error": "order_pay_state_conflict", "payment_verified": false,
+		})
+		return
+	}
+	s.extendQingyuSubscriptionAfterPayment(ctx, o.UserID, o.PlanID, &store.MembershipRechargeRecordParams{
+		UserID:               o.UserID,
+		Channel:              "huawei",
+		OrderID:              sql.NullInt64{Int64: o.ID, Valid: true},
+		OutTradeNo:           sql.NullString{String: o.OutTradeNo, Valid: strings.TrimSpace(o.OutTradeNo) != ""},
+		GatewayTransactionID: sql.NullString{String: tid, Valid: strings.TrimSpace(tid) != ""},
+		PlanID:               o.PlanID,
+	})
+	writeJSON(w, http.StatusOK, mergeHuaweiVerifyOK("paid", tid))
 }
 
 func clientIP(r *http.Request) string {

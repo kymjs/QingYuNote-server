@@ -36,6 +36,15 @@ type Config struct {
 	AppleIAPProductYearly     string
 	AppleAppStoreAppID        int64 // App Store Connect「App 信息」中的 Apple ID（数字）；Production 校验链需要。
 
+	// 华为应用内支付（Harmony 客户端 IAP）：OAuth 凭据见 AGC「API 管理 / OAuth 2.0 客户端」；商品 ID 与客户端常量一致。
+	HuaweiIAPClientID       string
+	HuaweiIAPClientSecret   string
+	HuaweiIAPOrderSiteURL   string // 未传 account_flag 或 flag=0 时使用的订单域根 URL，中国大陆应用常用 DRCN
+	HuaweiIAPPackageName    string // 须与 Harmony bundleName 一致，用于校验 purchaseTokenData.packageName
+	HuaweiIAPProductMonthly string
+	HuaweiIAPProductHalfYear string
+	HuaweiIAPProductYearly   string
+
 	QingyuWebDAVBaseURL  string
 	QingyuWebDAVUsername string
 	QingyuWebDAVPassword string
@@ -130,6 +139,16 @@ func Load() *Config {
 			log.Printf("warning: APPLE_APP_STORE_APP_ID invalid: %v", err)
 		}
 	}
+
+	c.HuaweiIAPClientID = getenv("HUAWEI_IAP_CLIENT_ID", "")
+	c.HuaweiIAPClientSecret = getenv("HUAWEI_IAP_CLIENT_SECRET", "")
+	c.HuaweiIAPOrderSiteURL = getenv("HUAWEI_IAP_ORDER_SITE_URL", "https://orders-drcn.iap.cloud.huawei.com.cn")
+	c.HuaweiIAPPackageName = getenv("HUAWEI_IAP_PACKAGE_NAME", "com.kymjs.note")
+	// 与 App Store 商品 ID 对齐，便于一套商品命名在双端配置。
+	c.HuaweiIAPProductMonthly = getenv("HUAWEI_IAP_PRODUCT_MONTHLY", "com.kymjs.note.qingyu.monthly")
+	c.HuaweiIAPProductHalfYear = getenv("HUAWEI_IAP_PRODUCT_HALF_YEAR", "com.kymjs.note.qingyu.half_year")
+	c.HuaweiIAPProductYearly = getenv("HUAWEI_IAP_PRODUCT_YEARLY", "com.kymjs.note.qingyu.yearly")
+
 	return c
 }
 
@@ -179,6 +198,33 @@ func (c *Config) AppleIAPVerifyConfigured() bool {
 		strings.TrimSpace(c.AppleIAPProductMonthly) != "" &&
 		strings.TrimSpace(c.AppleIAPProductHalfYear) != "" &&
 		strings.TrimSpace(c.AppleIAPProductYearly) != ""
+}
+
+// HuaweiIAPVerifyConfigured 为 true 时允许 Harmony 内购 purchaseToken 核销。
+func (c *Config) HuaweiIAPVerifyConfigured() bool {
+	return strings.TrimSpace(c.HuaweiIAPClientID) != "" &&
+		strings.TrimSpace(c.HuaweiIAPClientSecret) != "" &&
+		strings.TrimSpace(c.HuaweiIAPProductMonthly) != "" &&
+		strings.TrimSpace(c.HuaweiIAPProductHalfYear) != "" &&
+		strings.TrimSpace(c.HuaweiIAPProductYearly) != ""
+}
+
+// PlanFromHuaweiProductID 将华为 IAP 商品 ID 映射为订单 plan_id。
+func (c *Config) PlanFromHuaweiProductID(productID string) string {
+	p := strings.TrimSpace(productID)
+	if p == "" {
+		return ""
+	}
+	switch p {
+	case strings.TrimSpace(c.HuaweiIAPProductMonthly):
+		return "monthly"
+	case strings.TrimSpace(c.HuaweiIAPProductHalfYear):
+		return "half_year"
+	case strings.TrimSpace(c.HuaweiIAPProductYearly):
+		return "yearly"
+	default:
+		return ""
+	}
 }
 
 // PlanFromAppleProductID 将 App Store 商品 ID 映射为订单 plan_id；无法识别时返回空串。

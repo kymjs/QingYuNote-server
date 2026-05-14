@@ -22,7 +22,7 @@ type MembershipRechargeRecordParams struct {
 func normalizeRechargeChannel(ch string) (string, error) {
 	s := strings.TrimSpace(strings.ToLower(ch))
 	switch s {
-	case "wechat", "apple", "redeem":
+	case "wechat", "apple", "huawei", "redeem":
 		return s, nil
 	default:
 		return "", fmt.Errorf("invalid membership recharge channel")
