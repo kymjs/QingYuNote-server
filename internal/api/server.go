@@ -74,9 +74,11 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("DELETE /api/v1/me", s.auth(s.handleDeleteAccount))
 	mux.HandleFunc("GET /api/v1/qingyu/webdav", s.auth(s.handleQingyuWebDAV))
 	mux.HandleFunc("POST /api/v1/orders", s.auth(s.handleCreateOrder))
+	mux.HandleFunc("POST /api/v1/orders/{id}/alipay/app-pay", s.auth(s.handleAlipayAppPaySign))
 	mux.HandleFunc("POST /api/v1/orders/{id}/apple/verify", s.auth(s.handleAppleVerifyOrder))
 	mux.HandleFunc("POST /api/v1/orders/{id}/huawei/verify", s.auth(s.handleHuaweiVerifyOrder))
 	mux.HandleFunc("GET /api/v1/orders/{id}", s.auth(s.handleGetOrder))
+	mux.HandleFunc("POST /api/v1/webhooks/alipay/notify", s.handleAlipayNotify)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
@@ -532,12 +534,12 @@ type createOrderReq struct {
 }
 
 type orderWire struct {
-	ID                     int64  `json:"id"`
-	OutTradeNo             string `json:"out_trade_no"`
-	PlanID                 string `json:"plan_id"`
-	AmountTotal            int    `json:"amount_total"`
-	Status                 string `json:"status"`
-	GatewayTransactionID   string `json:"gateway_transaction_id,omitempty"` // 支付成功后：苹果 transactionId / 华为 orderId
+	ID                   int64  `json:"id"`
+	OutTradeNo           string `json:"out_trade_no"`
+	PlanID               string `json:"plan_id"`
+	AmountTotal          int    `json:"amount_total"`
+	Status               string `json:"status"`
+	GatewayTransactionID string `json:"gateway_transaction_id,omitempty"` // 支付成功后：苹果 transactionId / 华为 orderId
 }
 
 func (s *Server) handleCreateOrder(w http.ResponseWriter, r *http.Request, uid int64) {
@@ -769,9 +771,9 @@ func mergeHuaweiVerifyOK(status string, huaweiOrderID string) map[string]any {
 func (s *Server) handleHuaweiVerifyOrder(w http.ResponseWriter, r *http.Request, uid int64) {
 	if !s.Cfg.HuaweiIAPVerifyConfigured() {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
-			"error":              "huawei_iap_not_configured",
-			"message":            "服务端未配置 HUAWEI_IAP_CLIENT_ID / HUAWEI_IAP_CLIENT_SECRET / HUAWEI_IAP_PRODUCT_*",
-			"payment_verified":   false,
+			"error":            "huawei_iap_not_configured",
+			"message":          "服务端未配置 HUAWEI_IAP_CLIENT_ID / HUAWEI_IAP_CLIENT_SECRET / HUAWEI_IAP_PRODUCT_*",
+			"payment_verified": false,
 		})
 		return
 	}

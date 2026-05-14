@@ -10,19 +10,19 @@ import (
 
 // MembershipRechargeRecordParams 会籍充值/核销审计行（支付存订单号与网关流水，兑换存码哈希）。
 type MembershipRechargeRecordParams struct {
-	UserID                 int64
-	Channel                string
-	OrderID                sql.NullInt64
-	OutTradeNo             sql.NullString
-	GatewayTransactionID   sql.NullString
-	RedemptionCodeHash     sql.NullString
-	PlanID                 string
+	UserID               int64
+	Channel              string
+	OrderID              sql.NullInt64
+	OutTradeNo           sql.NullString
+	GatewayTransactionID sql.NullString
+	RedemptionCodeHash   sql.NullString
+	PlanID               string
 }
 
 func normalizeRechargeChannel(ch string) (string, error) {
 	s := strings.TrimSpace(strings.ToLower(ch))
 	switch s {
-	case "wechat", "apple", "huawei", "redeem":
+	case "wechat", "apple", "huawei", "alipay", "redeem":
 		return s, nil
 	default:
 		return "", fmt.Errorf("invalid membership recharge channel")

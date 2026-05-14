@@ -1,0 +1,225 @@
+package api
+
+import (
+	"database/sql"
+	"errors"
+	"fmt"
+	"log"
+	"math"
+	"net/http"
+	"strconv"
+	"strings"
+
+	"github.com/kymjs/noteapi/internal/alipayapp"
+	"github.com/kymjs/noteapi/internal/config"
+	"github.com/kymjs/noteapi/internal/store"
+	alipay "github.com/smartwalle/alipay/v3"
+)
+
+const alipayNotifyRelPath = "/api/v1/webhooks/alipay/notify"
+
+func (s *Server) alipayNotifyAbsURL() string {
+	return strings.TrimRight(s.Cfg.PublicBaseURL, "/") + alipayNotifyRelPath
+}
+
+func alipaySubjectForPlan(planID string) string {
+	switch strings.TrimSpace(planID) {
+	case "monthly":
+		return "轻羽云服务会员（月付）"
+	case "half_year":
+		return "轻羽云服务会员（半年付）"
+	case "yearly":
+		return "轻羽云服务会员（年付）"
+	default:
+		return "轻羽云服务会员"
+	}
+}
+
+func amountFenToAlipayYuan(fen int) string {
+	return fmt.Sprintf("%.2f", float64(fen)/100.0)
+}
+
+func parseAlipayTotalFen(totalAmount string) (int, bool) {
+	f, err := strconv.ParseFloat(strings.TrimSpace(totalAmount), 64)
+	if err != nil || f < 0 {
+		return 0, false
+	}
+	return int(math.Round(f * 100)), true
+}
+
+// handleAlipayAppPaySign 为待支付订单生成 alipay.trade.app.pay 的 orderStr（证书加签）。
+func (s *Server) handleAlipayAppPaySign(w http.ResponseWriter, r *http.Request, uid int64) {
+	if !s.Cfg.AlipayAppPayConfigured() {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error":   "alipay_not_configured",
+			"message": "服务端未配置 ALIPAY_* 或 PUBLIC_BASE_URL",
+		})
+		return
+	}
+	oid := config.ParseOrderIDParam(r.PathValue("id"))
+	if oid <= 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_order"})
+		return
+	}
+	ctx := r.Context()
+	o, err := s.Store.GetOrderByID(ctx, oid)
+	if err != nil || o.UserID != uid {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "order_not_found"})
+		return
+	}
+	if o.Status != "pending" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "order_not_payable"})
+		return
+	}
+	cli, err := alipayapp.NewClient(s.Cfg)
+	if err != nil {
+		log.Printf("alipay app-pay init: %v", err)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error":   "alipay_init_failed",
+			"message": err.Error(),
+		})
+		return
+	}
+	param := alipay.TradeAppPay{}
+	param.NotifyURL = s.alipayNotifyAbsURL()
+	param.Subject = alipaySubjectForPlan(o.PlanID)
+	param.OutTradeNo = o.OutTradeNo
+	param.TotalAmount = amountFenToAlipayYuan(o.AmountTotal)
+	param.ProductCode = "QUICK_MSECURITY_PAY"
+	param.Body = "qingyu_cloud"
+
+	orderStr, err := cli.TradeAppPay(param)
+	if err != nil {
+		log.Printf("alipay trade app pay: %v", err)
+		writeJSON(w, http.StatusBadGateway, map[string]string{
+			"error":   "alipay_sign_failed",
+			"message": err.Error(),
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"order_str": orderStr,
+		"app_id":    strings.TrimSpace(s.Cfg.AlipayAppID),
+	})
+}
+
+// handleAlipayNotify 处理支付宝异步通知（application/x-www-form-urlencoded），验签成功后标记订单并顺延订阅。
+func (s *Server) handleAlipayNotify(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	if err := r.ParseForm(); err != nil {
+		log.Printf("alipay notify parse: %v", err)
+		_, _ = w.Write([]byte("fail"))
+		return
+	}
+	if !s.Cfg.AlipayCoreConfigured() {
+		log.Printf("alipay notify: not configured")
+		_, _ = w.Write([]byte("fail"))
+		return
+	}
+	cli, err := alipayapp.NewClient(s.Cfg)
+	if err != nil {
+		log.Printf("alipay notify client: %v", err)
+		_, _ = w.Write([]byte("fail"))
+		return
+	}
+	n, err := cli.DecodeNotification(r.Form)
+	if err != nil {
+		log.Printf("alipay notify verify: %v", err)
+		_, _ = w.Write([]byte("fail"))
+		return
+	}
+	if strings.TrimSpace(n.AppId) != strings.TrimSpace(s.Cfg.AlipayAppID) {
+		log.Printf("alipay notify app_id mismatch")
+		_, _ = w.Write([]byte("fail"))
+		return
+	}
+	ctx := r.Context()
+	outNo := strings.TrimSpace(n.OutTradeNo)
+	if outNo == "" {
+		_, _ = w.Write([]byte("fail"))
+		return
+	}
+	o, err := s.Store.GetOrderByOutTradeNo(ctx, outNo)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			log.Printf("alipay notify unknown out_trade_no %s", outNo)
+			alipay.ACKNotification(w)
+			return
+		}
+		log.Printf("alipay notify db: %v", err)
+		_, _ = w.Write([]byte("fail"))
+		return
+	}
+
+	tradeNo := strings.TrimSpace(n.TradeNo)
+	if tradeNo == "" {
+		_, _ = w.Write([]byte("fail"))
+		return
+	}
+
+	if o.Status == "paid" {
+		exist := ""
+		if o.TransactionID.Valid {
+			exist = strings.TrimSpace(o.TransactionID.String)
+		}
+		if exist == "" || exist == tradeNo {
+			alipay.ACKNotification(w)
+			return
+		}
+		log.Printf("alipay notify paid conflict out=%s old_tx=%s new_tx=%s", outNo, exist, tradeNo)
+		alipay.ACKNotification(w)
+		return
+	}
+
+	switch n.TradeStatus {
+	case alipay.TradeStatusSuccess, alipay.TradeStatusFinished:
+	default:
+		alipay.ACKNotification(w)
+		return
+	}
+
+	gotFen, ok := parseAlipayTotalFen(n.TotalAmount)
+	if !ok || gotFen != o.AmountTotal {
+		log.Printf("alipay notify amount mismatch out=%s want_fen=%d got=%q", outNo, o.AmountTotal, n.TotalAmount)
+		_, _ = w.Write([]byte("fail"))
+		return
+	}
+
+	prev, errLookup := s.Store.GetOrderByTransactionID(ctx, tradeNo)
+	if errLookup != nil && !errors.Is(errLookup, sql.ErrNoRows) {
+		log.Printf("alipay notify lookup trade_no: %v", errLookup)
+		_, _ = w.Write([]byte("fail"))
+		return
+	}
+	if errLookup == nil && prev != nil && prev.ID != o.ID {
+		log.Printf("alipay notify duplicate trade_no different order")
+		_, _ = w.Write([]byte("fail"))
+		return
+	}
+
+	if err := s.Store.MarkOrderPaid(ctx, o.OutTradeNo, tradeNo); err != nil {
+		refreshed, err2 := s.Store.GetOrderByOutTradeNo(ctx, outNo)
+		if err2 == nil && refreshed.Status == "paid" &&
+			refreshed.TransactionID.Valid &&
+			strings.TrimSpace(refreshed.TransactionID.String) == tradeNo {
+			alipay.ACKNotification(w)
+			return
+		}
+		log.Printf("alipay mark paid: %v", err)
+		_, _ = w.Write([]byte("fail"))
+		return
+	}
+	s.extendQingyuSubscriptionAfterPayment(ctx, o.UserID, o.PlanID, &store.MembershipRechargeRecordParams{
+		UserID:               o.UserID,
+		Channel:              "alipay",
+		OrderID:              sql.NullInt64{Int64: o.ID, Valid: true},
+		OutTradeNo:           sql.NullString{String: o.OutTradeNo, Valid: true},
+		GatewayTransactionID: sql.NullString{String: tradeNo, Valid: true},
+		PlanID:               o.PlanID,
+	})
+	alipay.ACKNotification(w)
+}

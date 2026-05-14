@@ -30,18 +30,18 @@ type Config struct {
 	AppleAppSiteAssociationTeamID string
 
 	// App Store 内购（轻羽云）：校验客户端上报的 signedTransaction（JWS）。
-	AppleIAPBundleID          string
-	AppleIAPProductMonthly    string
-	AppleIAPProductHalfYear   string
-	AppleIAPProductYearly     string
-	AppleAppStoreAppID        int64 // App Store Connect「App 信息」中的 Apple ID（数字）；Production 校验链需要。
+	AppleIAPBundleID        string
+	AppleIAPProductMonthly  string
+	AppleIAPProductHalfYear string
+	AppleIAPProductYearly   string
+	AppleAppStoreAppID      int64 // App Store Connect「App 信息」中的 Apple ID（数字）；Production 校验链需要。
 
 	// 华为应用内支付（Harmony 客户端 IAP）：OAuth 凭据见 AGC「API 管理 / OAuth 2.0 客户端」；商品 ID 与客户端常量一致。
-	HuaweiIAPClientID       string
-	HuaweiIAPClientSecret   string
-	HuaweiIAPOrderSiteURL   string // 未传 account_flag 或 flag=0 时使用的订单域根 URL，中国大陆应用常用 DRCN
-	HuaweiIAPPackageName    string // 须与 Harmony bundleName 一致，用于校验 purchaseTokenData.packageName
-	HuaweiIAPProductMonthly string
+	HuaweiIAPClientID        string
+	HuaweiIAPClientSecret    string
+	HuaweiIAPOrderSiteURL    string // 未传 account_flag 或 flag=0 时使用的订单域根 URL，中国大陆应用常用 DRCN
+	HuaweiIAPPackageName     string // 须与 Harmony bundleName 一致，用于校验 purchaseTokenData.packageName
+	HuaweiIAPProductMonthly  string
 	HuaweiIAPProductHalfYear string
 	HuaweiIAPProductYearly   string
 
@@ -56,6 +56,15 @@ type Config struct {
 	AvatarPublicBaseURL  string
 
 	PublicBaseURL string
+
+	// 支付宝 App 支付（轻羽云等）：证书模式；应用私钥仅能通过环境变量或密钥文件注入服务端，勿提交仓库。
+	AlipayAppID                  string
+	AlipayAppPrivateKey          string // PEM；与 AlipayAppPrivateKeyPath 二选一
+	AlipayAppPrivateKeyPath      string
+	AlipayAppCertPublicPath      string // 应用公钥证书 .crt（开放平台「接口加签方式」）
+	AlipayPlatformCertPublicPath string // 支付宝公钥证书 alipayCertPublicKey_RSA2.crt
+	AlipayRootCertPath           string // alipayRootCert.crt
+	AlipayProduction             bool   // true=正式环境；false=沙箱（须与开放平台沙箱应用一致）
 
 	// 阿里云号码认证（短信验证码）：修改密码等场景 SendSmsVerifyCode / CheckSmsVerifyCode。
 	AliyunAccessKeyID     string
@@ -74,6 +83,19 @@ func getenv(key, def string) string {
 		return def
 	}
 	return v
+}
+
+// parseAlipayProduction 未设置 ALIPAY_PRODUCTION 时默认正式环境；显式 false/0 为沙箱。
+func parseAlipayProduction() bool {
+	raw := strings.TrimSpace(os.Getenv("ALIPAY_PRODUCTION"))
+	if raw == "" {
+		return true
+	}
+	b, err := strconv.ParseBool(raw)
+	if err != nil {
+		return true
+	}
+	return b
 }
 
 func Load() *Config {
@@ -112,6 +134,14 @@ func Load() *Config {
 		AvatarPublicBaseURL:  strings.TrimRight(getenv("AVATAR_PUBLIC_BASE_URL", "http://cdn.kymjs.com:8843/note-avatar"), "/"),
 
 		PublicBaseURL: strings.TrimRight(getenv("PUBLIC_BASE_URL", "https://noteapi.kymjs.com"), "/"),
+
+		AlipayAppID:                  getenv("ALIPAY_APP_ID", ""),
+		AlipayAppPrivateKey:          getenv("ALIPAY_APP_PRIVATE_KEY", ""),
+		AlipayAppPrivateKeyPath:      getenv("ALIPAY_APP_PRIVATE_KEY_PATH", ""),
+		AlipayAppCertPublicPath:      getenv("ALIPAY_APP_CERT_PUBLIC_PATH", ""),
+		AlipayPlatformCertPublicPath: getenv("ALIPAY_PLATFORM_CERT_PUBLIC_PATH", ""),
+		AlipayRootCertPath:           getenv("ALIPAY_ROOT_CERT_PATH", ""),
+		AlipayProduction:             parseAlipayProduction(),
 
 		AliyunAccessKeyID:      getenv("ALIYUN_ACCESS_KEY_ID", ""),
 		AliyunAccessKeySecret:  getenv("ALIYUN_ACCESS_KEY_SECRET", ""),
@@ -269,6 +299,25 @@ func PlanAmountFen(plan string) int {
 	default:
 		return 0
 	}
+}
+
+// AlipayCoreConfigured 为 true 时表示已配置证书模式所需全部文件/密钥（不校验文件是否可读）。
+func (c *Config) AlipayCoreConfigured() bool {
+	if strings.TrimSpace(c.AlipayAppID) == "" {
+		return false
+	}
+	hasPK := strings.TrimSpace(c.AlipayAppPrivateKey) != "" || strings.TrimSpace(c.AlipayAppPrivateKeyPath) != ""
+	if !hasPK {
+		return false
+	}
+	return strings.TrimSpace(c.AlipayAppCertPublicPath) != "" &&
+		strings.TrimSpace(c.AlipayPlatformCertPublicPath) != "" &&
+		strings.TrimSpace(c.AlipayRootCertPath) != ""
+}
+
+// AlipayAppPayConfigured 为 true 时可签发 orderStr（依赖 PUBLIC_BASE_URL 拼异步通知地址）。
+func (c *Config) AlipayAppPayConfigured() bool {
+	return c.AlipayCoreConfigured() && strings.TrimSpace(c.PublicBaseURL) != ""
 }
 
 // AliyunSMSConfigured 为 true 时允许发送/核验短信验证码（修改密码短信流程）。
