@@ -98,16 +98,23 @@ func (s *Server) adminAuth(next func(http.ResponseWriter, *http.Request)) http.H
 	}
 }
 
+type adminRechargeRecordWire struct {
+	Time       string  `json:"time"`
+	Channel    string  `json:"channel"`
+	AmountYuan float64 `json:"amount_yuan"`
+}
+
 type adminUserWire struct {
-	ID                 int64   `json:"id"`
-	Account            string  `json:"account"`
-	Phone              *string `json:"phone"`
-	Nickname           *string `json:"nickname"`
-	AvatarURL          *string `json:"avatar_url"`
-	QingyuActive       bool    `json:"qingyu_active"`
-	QingyuExpiresAt    string  `json:"qingyu_expires_at,omitempty"`
-	QingyuIsLifetime   bool    `json:"qingyu_is_lifetime"`
-	TotalRechargeYuan  float64 `json:"total_recharge_yuan"`
+	ID                 int64                     `json:"id"`
+	Account            string                    `json:"account"`
+	Phone              *string                   `json:"phone"`
+	Nickname           *string                   `json:"nickname"`
+	AvatarURL          *string                   `json:"avatar_url"`
+	QingyuActive       bool                      `json:"qingyu_active"`
+	QingyuExpiresAt    string                    `json:"qingyu_expires_at,omitempty"`
+	QingyuIsLifetime   bool                      `json:"qingyu_is_lifetime"`
+	TotalRechargeYuan  float64                   `json:"total_recharge_yuan"`
+	RechargeRecords    []adminRechargeRecordWire `json:"recharge_records"`
 }
 
 func adminAccountLabel(id int64, displayName, phone sql.NullString) string {
@@ -127,6 +134,19 @@ func (s *Server) handleAdminListUsers(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
 		return
 	}
+	userIDs := make([]int64, len(rows))
+	for i, row := range rows {
+		userIDs[i] = row.ID
+	}
+	recByUser, err := s.Store.ListAdminUserRechargeRecords(ctx, userIDs)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
+		return
+	}
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		loc = time.UTC
+	}
 	now := time.Now().UTC()
 	out := make([]adminUserWire, 0, len(rows))
 	for _, row := range rows {
@@ -140,6 +160,15 @@ func (s *Server) handleAdminListUsers(w http.ResponseWriter, r *http.Request) {
 		}
 		state, expYmd, life := subscription.RowToAPIState(sub, now)
 		qingyuOK := state == "active" || state == "lifetime"
+		recs := recByUser[row.ID]
+		wireRecs := make([]adminRechargeRecordWire, 0, len(recs))
+		for _, r := range recs {
+			wireRecs = append(wireRecs, adminRechargeRecordWire{
+				Time:       r.CreatedAt.In(loc).Format("2006-01-02 15:04:05"),
+				Channel:    r.Channel,
+				AmountYuan: float64(r.AmountFen) / 100.0,
+			})
+		}
 		wire := adminUserWire{
 			ID:                row.ID,
 			Account:           adminAccountLabel(row.ID, row.DisplayName, row.Phone),
@@ -150,6 +179,7 @@ func (s *Server) handleAdminListUsers(w http.ResponseWriter, r *http.Request) {
 			QingyuExpiresAt:   expYmd,
 			QingyuIsLifetime:  life,
 			TotalRechargeYuan: float64(row.TotalRechargeFen) / 100.0,
+			RechargeRecords:   wireRecs,
 		}
 		out = append(out, wire)
 	}

@@ -3,6 +3,11 @@ package store
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/kymjs/noteapi/internal/config"
 )
 
 // AdminUserRow 管理后台用户列表行。
@@ -49,6 +54,72 @@ ORDER BY u.id DESC`
 		}
 		r.IsLifetime = life != 0
 		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// AdminRechargeRecordRow 管理后台展示的会籍充值审计记录（新到旧排序由查询保证）。
+type AdminRechargeRecordRow struct {
+	Channel   string
+	CreatedAt time.Time
+	AmountFen int64
+}
+
+// ListAdminUserRechargeRecords 按用户查询 membership_recharge_records，用于管理后台「充值记录」列。
+func (s *Store) ListAdminUserRechargeRecords(ctx context.Context, userIDs []int64) (map[int64][]AdminRechargeRecordRow, error) {
+	uniq := make([]int64, 0, len(userIDs))
+	seen := map[int64]struct{}{}
+	for _, id := range userIDs {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		uniq = append(uniq, id)
+	}
+	out := make(map[int64][]AdminRechargeRecordRow)
+	if len(uniq) == 0 {
+		return out, nil
+	}
+	ph := make([]string, len(uniq))
+	args := make([]any, len(uniq))
+	for i, id := range uniq {
+		ph[i] = "?"
+		args[i] = id
+	}
+	q := fmt.Sprintf(`
+SELECT m.user_id, m.channel, m.created_at, m.plan_id, o.amount_total
+FROM membership_recharge_records m
+LEFT JOIN orders o ON o.id = m.order_id
+WHERE m.user_id IN (%s)
+ORDER BY m.user_id ASC, m.created_at DESC`, strings.Join(ph, ","))
+	rows, err := s.DB.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var uid int64
+		var ch string
+		var created time.Time
+		var planID string
+		var orderAmt sql.NullInt64
+		if err := rows.Scan(&uid, &ch, &created, &planID, &orderAmt); err != nil {
+			return nil, err
+		}
+		var fen int64
+		if orderAmt.Valid {
+			fen = orderAmt.Int64
+		} else {
+			fen = int64(config.PlanAmountFen(planID))
+		}
+		out[uid] = append(out[uid], AdminRechargeRecordRow{
+			Channel:   ch,
+			CreatedAt: created,
+			AmountFen: fen,
+		})
 	}
 	return out, rows.Err()
 }
