@@ -80,6 +80,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/orders/{id}/huawei/verify", s.auth(s.handleHuaweiVerifyOrder))
 	mux.HandleFunc("GET /api/v1/orders/{id}", s.auth(s.handleGetOrder))
 	mux.HandleFunc("POST /api/v1/webhooks/alipay/notify", s.handleAlipayNotify)
+	mux.HandleFunc("POST /api/v1/admin/auth/login", s.handleAdminLogin)
+	mux.HandleFunc("GET /api/v1/admin/users", s.adminAuth(s.handleAdminListUsers))
+	mux.HandleFunc("POST /api/v1/admin/redemption-codes", s.adminAuth(s.handleAdminCreateRedemptionCodes))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
@@ -89,7 +92,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /apple-app-site-association", s.handleAppleAppSiteAssociation)
 	mux.HandleFunc("GET /wx/login/", s.handleWXUniversalLinkLanding)
 	mux.HandleFunc("GET /wx/login", s.handleWXLoginNoTrailingSlash)
-	return mux
+	return withCORS(mux)
 }
 
 func (s *Server) auth(next func(http.ResponseWriter, *http.Request, int64)) http.HandlerFunc {

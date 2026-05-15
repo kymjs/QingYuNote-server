@@ -77,6 +77,12 @@ type Config struct {
 	AliyunSMSSchemeName   string
 	// AliyunSMSTemplateParam JSON，默认 {"code":"##code##","min":"5"}；须与控制台模板变量一致。
 	AliyunSMSTemplateParam string
+
+	// 管理后台（panel 前端调用）：登录凭据与兑换码签发密钥。
+	AdminUsername          string
+	AdminPassword          string
+	RedemptionIssueSecret  string
+	FeishuRedemptionWebhook string
 }
 
 func getenv(key, def string) string {
@@ -153,6 +159,11 @@ func Load() *Config {
 		AliyunSMSTemplateCode:  getenv("ALIYUN_SMS_TEMPLATE_CODE", ""),
 		AliyunSMSSchemeName:    getenv("ALIYUN_SMS_SCHEME_NAME", ""),
 		AliyunSMSTemplateParam: getenv("ALIYUN_SMS_TEMPLATE_PARAM", `{"code":"##code##","min":"5"}`),
+
+		AdminUsername:           getenv("ADMIN_USERNAME", ""),
+		AdminPassword:           getenv("ADMIN_PASSWORD", ""),
+		RedemptionIssueSecret:   getenv("REDEMPTION_ISSUE_SECRET", ""),
+		FeishuRedemptionWebhook: getenv("FEISHU_REDEMPTION_WEBHOOK_URL", ""),
 	}
 
 	if c.JWTSecret == "" {
@@ -163,6 +174,9 @@ func Load() *Config {
 	}
 	if !c.AvatarWebDAVConfigured() {
 		log.Printf("warning: AVATAR_WEBDAV_USERNAME / PASSWORD unset — avatar upload returns 503 until set")
+	}
+	if !c.AdminConfigured() {
+		log.Printf("warning: ADMIN_USERNAME / ADMIN_PASSWORD unset — admin panel login returns 503 until set")
 	}
 	// App Store 数字 App ID：用于 JWS 在 Production 环境的校验；沙盒可留 0。
 	if raw := strings.TrimSpace(getenv("APPLE_APP_STORE_APP_ID", "")); raw != "" {
@@ -296,9 +310,9 @@ func PlanAmountFen(plan string) int {
 	case "monthly":
 		return 1000
 	case "half_year":
-		return 6000
+		return 5000
 	case "yearly":
-		return 10000
+		return 7300
 	default:
 		return 0
 	}
@@ -329,6 +343,17 @@ func (c *Config) AliyunSMSConfigured() bool {
 		strings.TrimSpace(c.AliyunAccessKeySecret) != "" &&
 		strings.TrimSpace(c.AliyunSMSSignName) != "" &&
 		strings.TrimSpace(c.AliyunSMSTemplateCode) != ""
+}
+
+// AdminConfigured 为 true 时允许管理后台登录与受保护接口。
+func (c *Config) AdminConfigured() bool {
+	return strings.TrimSpace(c.AdminUsername) != "" &&
+		strings.TrimSpace(c.AdminPassword) != ""
+}
+
+// RedemptionIssueConfigured 为 true 时允许通过管理后台签发兑换码。
+func (c *Config) RedemptionIssueConfigured() bool {
+	return strings.TrimSpace(c.RedemptionIssueSecret) != ""
 }
 
 func ParseOrderIDParam(v string) int64 {
