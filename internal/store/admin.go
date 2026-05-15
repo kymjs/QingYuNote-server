@@ -12,19 +12,24 @@ import (
 
 // AdminUserRow 管理后台用户列表行。
 type AdminUserRow struct {
-	ID               int64
-	DisplayName      sql.NullString
-	AvatarURL        sql.NullString
-	Phone            sql.NullString
-	ExpiresAt        sql.NullTime
-	IsLifetime       bool
-	TotalRechargeFen int64
+	ID                  int64
+	DisplayName         sql.NullString
+	AvatarURL           sql.NullString
+	Phone               sql.NullString
+	CreatedAt           time.Time
+	FirstIdentityProv   sql.NullString
+	FirstIdentityAt     sql.NullTime
+	ExpiresAt           sql.NullTime
+	IsLifetime          bool
+	TotalRechargeFen    int64
 }
 
 // ListAdminUsers 返回全部注册用户及订阅、累计充值（已支付订单金额之和，单位分）。
 func (s *Store) ListAdminUsers(ctx context.Context) ([]AdminUserRow, error) {
 	q := `
-SELECT u.id, u.display_name, u.avatar_url, u.phone,
+SELECT u.id, u.display_name, u.avatar_url, u.phone, u.created_at,
+       (SELECT i.provider FROM user_identities i WHERE i.user_id = u.id ORDER BY i.created_at ASC LIMIT 1),
+       (SELECT i.created_at FROM user_identities i WHERE i.user_id = u.id ORDER BY i.created_at ASC LIMIT 1),
        s.expires_at, COALESCE(s.is_lifetime, 0),
        COALESCE(paid.total_fen, 0)
 FROM users u
@@ -47,7 +52,8 @@ ORDER BY u.id DESC`
 		var r AdminUserRow
 		var life int
 		if err := rows.Scan(
-			&r.ID, &r.DisplayName, &r.AvatarURL, &r.Phone,
+			&r.ID, &r.DisplayName, &r.AvatarURL, &r.Phone, &r.CreatedAt,
+			&r.FirstIdentityProv, &r.FirstIdentityAt,
 			&r.ExpiresAt, &life, &r.TotalRechargeFen,
 		); err != nil {
 			return nil, err

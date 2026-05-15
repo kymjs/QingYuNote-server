@@ -106,7 +106,7 @@ type adminRechargeRecordWire struct {
 
 type adminUserWire struct {
 	ID                 int64                     `json:"id"`
-	Account            string                    `json:"account"`
+	RegisterSource     string                    `json:"register_source"`
 	Phone              *string                   `json:"phone"`
 	Nickname           *string                   `json:"nickname"`
 	AvatarURL          *string                   `json:"avatar_url"`
@@ -117,14 +117,27 @@ type adminUserWire struct {
 	RechargeRecords    []adminRechargeRecordWire `json:"recharge_records"`
 }
 
-func adminAccountLabel(id int64, displayName, phone sql.NullString) string {
-	if displayName.Valid && strings.TrimSpace(displayName.String) != "" {
-		return strings.TrimSpace(displayName.String)
+// 同一事务内创建用户与首条 OAuth identity 时 created_at 应几乎相同；手机号注册后再绑定第三方则 identity 更晚，仍视为验证码注册。
+const adminRegisterSourceOAuthSyncWindow = 2 * time.Second
+
+func adminRegisterSource(userCreated time.Time, prov sql.NullString, identAt sql.NullTime) string {
+	if !prov.Valid || !identAt.Valid {
+		return "sms"
 	}
-	if phone.Valid && strings.TrimSpace(phone.String) != "" {
-		return strings.TrimSpace(phone.String)
+	delta := identAt.Time.Sub(userCreated)
+	if delta > adminRegisterSourceOAuthSyncWindow || delta < -adminRegisterSourceOAuthSyncWindow {
+		return "sms"
 	}
-	return fmt.Sprintf("用户%d", id)
+	switch strings.ToLower(strings.TrimSpace(prov.String)) {
+	case "huawei":
+		return "huawei"
+	case "apple":
+		return "apple"
+	case "wechat":
+		return "wechat"
+	default:
+		return "sms"
+	}
 }
 
 func (s *Server) handleAdminListUsers(w http.ResponseWriter, r *http.Request) {
@@ -171,7 +184,7 @@ func (s *Server) handleAdminListUsers(w http.ResponseWriter, r *http.Request) {
 		}
 		wire := adminUserWire{
 			ID:                row.ID,
-			Account:           adminAccountLabel(row.ID, row.DisplayName, row.Phone),
+			RegisterSource:    adminRegisterSource(row.CreatedAt, row.FirstIdentityProv, row.FirstIdentityAt),
 			Phone:             strPtrOrNil(row.Phone),
 			Nickname:          strPtrOrNil(row.DisplayName),
 			AvatarURL:         strPtrOrNil(row.AvatarURL),
