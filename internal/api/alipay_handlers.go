@@ -105,7 +105,8 @@ func (s *Server) handleAlipayAppPaySign(w http.ResponseWriter, r *http.Request, 
 	})
 }
 
-// handleAlipayPagePaySign 为待支付订单生成 alipay.trade.page.pay 收银台 URL（桌面浏览器打开；须签约电脑网站支付等产品）。
+// handleAlipayPagePaySign 为待支付订单生成 alipay.trade.page.pay 收银台 URL（桌面浏览器打开）。
+// 须与「App 支付」区分：开放平台须单独签约并生效「电脑网站支付」，否则收银台页常见 insufficient-isv-permissions。
 func (s *Server) handleAlipayPagePaySign(w http.ResponseWriter, r *http.Request, uid int64) {
 	if !s.Cfg.AlipayAppPayConfigured() {
 		s.Cfg.LogAlipayDiagnostic("http_alipay_page_pay")
