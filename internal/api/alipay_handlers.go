@@ -7,6 +7,7 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -100,6 +101,82 @@ func (s *Server) handleAlipayAppPaySign(w http.ResponseWriter, r *http.Request, 
 	writeJSON(w, http.StatusOK, map[string]string{
 		"order_str": orderStr,
 		"app_id":    strings.TrimSpace(s.Cfg.AlipayAppID),
+	})
+}
+
+// handleAlipayPagePaySign 为待支付订单生成 alipay.trade.page.pay 收银台 URL（桌面浏览器打开；须签约电脑网站支付等产品）。
+func (s *Server) handleAlipayPagePaySign(w http.ResponseWriter, r *http.Request, uid int64) {
+	if !s.Cfg.AlipayAppPayConfigured() {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error":   "alipay_not_configured",
+			"message": "服务端未配置 ALIPAY_* 或 PUBLIC_BASE_URL",
+		})
+		return
+	}
+	oid := config.ParseOrderIDParam(r.PathValue("id"))
+	if oid <= 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_order"})
+		return
+	}
+	ctx := r.Context()
+	o, err := s.Store.GetOrderByID(ctx, oid)
+	if err != nil || o.UserID != uid {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "order_not_found"})
+		return
+	}
+	if o.Status != "pending" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "order_not_payable"})
+		return
+	}
+	cli, err := alipayapp.NewClient(s.Cfg)
+	if err != nil {
+		log.Printf("alipay page-pay init: %v", err)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error":   "alipay_init_failed",
+			"message": err.Error(),
+		})
+		return
+	}
+	ret := strings.TrimSpace(s.Cfg.AlipayPagePayReturnURL)
+	if ret == "" {
+		ret = "https://note.kymjs.com/private/harmony.html"
+	}
+	param := alipay.TradePagePay{}
+	param.NotifyURL = s.alipayNotifyAbsURL()
+	param.ReturnURL = ret
+	param.Subject = alipaySubjectForPlan(o.PlanID)
+	param.OutTradeNo = o.OutTradeNo
+	param.TotalAmount = amountFenToAlipayYuan(o.AmountTotal)
+	param.ProductCode = "FAST_INSTANT_TRADE_PAY"
+	param.Body = "qingyu_cloud"
+
+	payURL, err := cli.TradePagePay(param)
+	if err != nil {
+		log.Printf("alipay trade page pay: %v", err)
+		writeJSON(w, http.StatusBadGateway, map[string]string{
+			"error":   "alipay_page_pay_failed",
+			"message": err.Error(),
+		})
+		return
+	}
+	if payURL == nil || strings.TrimSpace(payURL.String()) == "" {
+		writeJSON(w, http.StatusBadGateway, map[string]string{
+			"error": "alipay_page_pay_empty",
+		})
+		return
+	}
+	u := payURL.String()
+	parsed, err := url.Parse(u)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") {
+		log.Printf("alipay page pay invalid url err=%v scheme=%q host=%q", err, parsed.Scheme, parsed.Host)
+		writeJSON(w, http.StatusBadGateway, map[string]string{
+			"error": "alipay_page_pay_invalid_url",
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"pay_url": u,
+		"app_id":  strings.TrimSpace(s.Cfg.AlipayAppID),
 	})
 }
 

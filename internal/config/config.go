@@ -65,6 +65,8 @@ type Config struct {
 	AlipayPlatformCertPublicPath string // 支付宝公钥证书 alipayCertPublicKey_RSA2.crt
 	AlipayRootCertPath           string // alipayRootCert.crt
 	AlipayProduction             bool   // true=正式环境；false=沙箱（须与开放平台沙箱应用一致）
+	// alipay.trade.page.pay 同步跳转 return_url（桌面浏览器支付完成后回跳；须 https 可访问页）。
+	AlipayPagePayReturnURL string
 
 	// 阿里云号码认证（短信验证码）：修改密码等场景 SendSmsVerifyCode / CheckSmsVerifyCode。
 	AliyunAccessKeyID     string
@@ -142,6 +144,7 @@ func Load() *Config {
 		AlipayPlatformCertPublicPath: getenv("ALIPAY_PLATFORM_CERT_PUBLIC_PATH", ""),
 		AlipayRootCertPath:           getenv("ALIPAY_ROOT_CERT_PATH", ""),
 		AlipayProduction:             parseAlipayProduction(),
+		AlipayPagePayReturnURL:       strings.TrimSpace(getenv("ALIPAY_PAGE_PAY_RETURN_URL", "https://note.kymjs.com/private/harmony.html")),
 
 		AliyunAccessKeyID:      getenv("ALIYUN_ACCESS_KEY_ID", ""),
 		AliyunAccessKeySecret:  getenv("ALIYUN_ACCESS_KEY_SECRET", ""),

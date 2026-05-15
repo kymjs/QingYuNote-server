@@ -75,6 +75,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/qingyu/webdav", s.auth(s.handleQingyuWebDAV))
 	mux.HandleFunc("POST /api/v1/orders", s.auth(s.handleCreateOrder))
 	mux.HandleFunc("POST /api/v1/orders/{id}/alipay/app-pay", s.auth(s.handleAlipayAppPaySign))
+	mux.HandleFunc("POST /api/v1/orders/{id}/alipay/page-pay", s.auth(s.handleAlipayPagePaySign))
 	mux.HandleFunc("POST /api/v1/orders/{id}/apple/verify", s.auth(s.handleAppleVerifyOrder))
 	mux.HandleFunc("POST /api/v1/orders/{id}/huawei/verify", s.auth(s.handleHuaweiVerifyOrder))
 	mux.HandleFunc("GET /api/v1/orders/{id}", s.auth(s.handleGetOrder))
