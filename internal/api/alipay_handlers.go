@@ -51,6 +51,7 @@ func parseAlipayTotalFen(totalAmount string) (int, bool) {
 // handleAlipayAppPaySign 为待支付订单生成 alipay.trade.app.pay 的 orderStr（证书加签）。
 func (s *Server) handleAlipayAppPaySign(w http.ResponseWriter, r *http.Request, uid int64) {
 	if !s.Cfg.AlipayAppPayConfigured() {
+		s.Cfg.LogAlipayDiagnostic("http_alipay_app_pay")
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
 			"error":   "alipay_not_configured",
 			"message": "服务端未配置 ALIPAY_* 或 PUBLIC_BASE_URL",
@@ -107,6 +108,7 @@ func (s *Server) handleAlipayAppPaySign(w http.ResponseWriter, r *http.Request, 
 // handleAlipayPagePaySign 为待支付订单生成 alipay.trade.page.pay 收银台 URL（桌面浏览器打开；须签约电脑网站支付等产品）。
 func (s *Server) handleAlipayPagePaySign(w http.ResponseWriter, r *http.Request, uid int64) {
 	if !s.Cfg.AlipayAppPayConfigured() {
+		s.Cfg.LogAlipayDiagnostic("http_alipay_page_pay")
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
 			"error":   "alipay_not_configured",
 			"message": "服务端未配置 ALIPAY_* 或 PUBLIC_BASE_URL",
@@ -193,7 +195,8 @@ func (s *Server) handleAlipayNotify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.Cfg.AlipayCoreConfigured() {
-		log.Printf("alipay notify: not configured")
+		s.Cfg.LogAlipayDiagnostic("http_alipay_notify_core_off")
+		log.Printf("alipay notify: AlipayCoreConfigured=false")
 		_, _ = w.Write([]byte("fail"))
 		return
 	}

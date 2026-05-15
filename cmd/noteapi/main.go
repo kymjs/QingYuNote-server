@@ -25,6 +25,9 @@ func main() {
 		log.SetOutput(io.MultiWriter(os.Stderr, f))
 	}
 
+	if !cfg.AlipayAppPayConfigured() {
+		cfg.LogAlipayDiagnostic("startup_alipay_gate_off")
+	}
 	st, err := store.OpenMySQL(cfg.MySQLDSN)
 	if err != nil {
 		log.Fatalf("mysql: %v", err)
