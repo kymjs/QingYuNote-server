@@ -111,10 +111,27 @@ ORDER BY user_id ASC, last_active_at DESC`, strings.Join(ph, ","))
 		if err := rows.Scan(&uid, &platform, &lastActive); err != nil {
 			return nil, err
 		}
-		out[uid] = append(out[uid], AdminDeviceSession{
-			Platform:     platform,
-			LastActiveAt: lastActive,
-		})
+		if out[uid] == nil {
+			out[uid] = append(out[uid], AdminDeviceSession{
+				Platform:     platform,
+				LastActiveAt: lastActive,
+			})
+		} else {
+			// 同用户同平台只保留第一条（最新时间）
+			seen := false
+			for _, e := range out[uid] {
+				if e.Platform == platform {
+					seen = true
+					break
+				}
+			}
+			if !seen {
+				out[uid] = append(out[uid], AdminDeviceSession{
+					Platform:     platform,
+					LastActiveAt: lastActive,
+				})
+			}
+		}
 	}
 	return out, rows.Err()
 }
