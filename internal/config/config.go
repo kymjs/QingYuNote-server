@@ -68,6 +68,14 @@ type Config struct {
 	// alipay.trade.page.pay 同步跳转 return_url（桌面浏览器支付完成后回跳；须 https 可访问页）。
 	AlipayPagePayReturnURL string
 
+	// 支付宝 PC 网站支付（电脑网站支付）：独立 APPID + 证书，与移动端 App 支付分离。
+	AlipayPcAppID                  string
+	AlipayPcAppPrivateKey          string // PEM；与 AlipayPcAppPrivateKeyPath 二选一
+	AlipayPcAppPrivateKeyPath      string
+	AlipayPcAppCertPublicPath      string // 应用公钥证书 .crt
+	AlipayPcPlatformCertPublicPath string // 支付宝公钥证书 alipayCertPublicKey_RSA2.crt
+	AlipayPcRootCertPath           string // alipayRootCert.crt
+
 	// 阿里云号码认证（短信验证码）：修改密码等场景 SendSmsVerifyCode / CheckSmsVerifyCode。
 	AliyunAccessKeyID     string
 	AliyunAccessKeySecret string
@@ -151,6 +159,13 @@ func Load() *Config {
 		AlipayRootCertPath:           getenv("ALIPAY_ROOT_CERT_PATH", ""),
 		AlipayProduction:             parseAlipayProduction(),
 		AlipayPagePayReturnURL:       strings.TrimSpace(getenv("ALIPAY_PAGE_PAY_RETURN_URL", "https://note.kymjs.com/private/harmony.html")),
+
+		AlipayPcAppID:                  getenv("ALIPAY_PC_APP_ID", ""),
+		AlipayPcAppPrivateKey:          getenv("ALIPAY_PC_APP_PRIVATE_KEY", ""),
+		AlipayPcAppPrivateKeyPath:      getenv("ALIPAY_PC_APP_PRIVATE_KEY_PATH", ""),
+		AlipayPcAppCertPublicPath:      getenv("ALIPAY_PC_APP_CERT_PUBLIC_PATH", ""),
+		AlipayPcPlatformCertPublicPath: getenv("ALIPAY_PC_PLATFORM_CERT_PUBLIC_PATH", ""),
+		AlipayPcRootCertPath:           getenv("ALIPAY_PC_ROOT_CERT_PATH", ""),
 
 		AliyunAccessKeyID:      getenv("ALIYUN_ACCESS_KEY_ID", ""),
 		AliyunAccessKeySecret:  getenv("ALIYUN_ACCESS_KEY_SECRET", ""),
@@ -335,6 +350,25 @@ func (c *Config) AlipayCoreConfigured() bool {
 // AlipayAppPayConfigured 为 true 时可签发 orderStr（依赖 PUBLIC_BASE_URL 拼异步通知地址）。
 func (c *Config) AlipayAppPayConfigured() bool {
 	return c.AlipayCoreConfigured() && strings.TrimSpace(c.PublicBaseURL) != ""
+}
+
+// AlipayPcCoreConfigured 为 true 时表示已配置 PC 网站支付所需全部文件/密钥。
+func (c *Config) AlipayPcCoreConfigured() bool {
+	if strings.TrimSpace(c.AlipayPcAppID) == "" {
+		return false
+	}
+	hasPK := strings.TrimSpace(c.AlipayPcAppPrivateKey) != "" || strings.TrimSpace(c.AlipayPcAppPrivateKeyPath) != ""
+	if !hasPK {
+		return false
+	}
+	return strings.TrimSpace(c.AlipayPcAppCertPublicPath) != "" &&
+		strings.TrimSpace(c.AlipayPcPlatformCertPublicPath) != "" &&
+		strings.TrimSpace(c.AlipayPcRootCertPath) != ""
+}
+
+// AlipayPcPayConfigured 为 true 时可签发 page-pay（依赖 PUBLIC_BASE_URL 拼异步通知地址）。
+func (c *Config) AlipayPcPayConfigured() bool {
+	return c.AlipayPcCoreConfigured() && strings.TrimSpace(c.PublicBaseURL) != ""
 }
 
 // AliyunSMSConfigured 为 true 时允许发送/核验短信验证码（修改密码短信流程）。

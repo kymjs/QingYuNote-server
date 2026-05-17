@@ -64,6 +64,61 @@ ORDER BY u.id DESC`
 	return out, rows.Err()
 }
 
+// AdminDeviceSession 管理后台展示的用户设备使用信息。
+type AdminDeviceSession struct {
+	Platform     string
+	LastActiveAt time.Time
+}
+
+// ListAdminUserDevices 按用户查询设备的最后活跃时间，用于管理后台「使用端口」列。
+func (s *Store) ListAdminUserDevices(ctx context.Context, userIDs []int64) (map[int64][]AdminDeviceSession, error) {
+	uniq := make([]int64, 0, len(userIDs))
+	seen := map[int64]struct{}{}
+	for _, id := range userIDs {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		uniq = append(uniq, id)
+	}
+	out := make(map[int64][]AdminDeviceSession)
+	if len(uniq) == 0 {
+		return out, nil
+	}
+	ph := make([]string, len(uniq))
+	args := make([]any, len(uniq))
+	for i, id := range uniq {
+		ph[i] = "?"
+		args[i] = id
+	}
+	q := fmt.Sprintf(`
+SELECT user_id, platform, last_active_at
+FROM user_device_sessions
+WHERE user_id IN (%s)
+ORDER BY user_id ASC, last_active_at DESC`, strings.Join(ph, ","))
+	rows, err := s.DB.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var uid int64
+		var platform string
+		var lastActive time.Time
+		if err := rows.Scan(&uid, &platform, &lastActive); err != nil {
+			return nil, err
+		}
+		out[uid] = append(out[uid], AdminDeviceSession{
+			Platform:     platform,
+			LastActiveAt: lastActive,
+		})
+	}
+	return out, rows.Err()
+}
+
 // AdminRechargeRecordRow 管理后台展示的会籍充值审计记录（新到旧排序由查询保证）。
 type AdminRechargeRecordRow struct {
 	Channel   string

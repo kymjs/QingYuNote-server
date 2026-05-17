@@ -108,6 +108,13 @@ func (s *Server) auth(next func(http.ResponseWriter, *http.Request, int64)) http
 			http.Error(w, `{"error":"invalid_token"}`, http.StatusUnauthorized)
 			return
 		}
+		platform, deviceID := extractDeviceInfo(r)
+		if platform != "" && deviceID != "" {
+			go func() {
+				ctx := context.Background()
+				_ = s.Store.UpsertUserDeviceSession(ctx, uid, platform, deviceID)
+			}()
+		}
 		next(w, r, uid)
 	}
 }
@@ -134,11 +141,18 @@ type authLoginResp struct {
 	UserID      int64  `json:"user_id"`
 }
 
-func (s *Server) issueAuthToken(w http.ResponseWriter, userID int64) bool {
+func (s *Server) issueAuthToken(w http.ResponseWriter, userID int64, platform, deviceID string) bool {
 	tok, err := auth.SignAccessToken(userID, s.Cfg.JWTSecret, 7*24*time.Hour)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "token_failed"})
 		return false
+	}
+	// 记录设备会话（异步，不阻塞登录响应）
+	if platform != "" && deviceID != "" {
+		go func() {
+			ctx := context.Background()
+			_ = s.Store.UpsertUserDeviceSession(ctx, userID, platform, deviceID)
+		}()
 	}
 	resp := authLoginResp{
 		AccessToken: tok,
@@ -147,6 +161,13 @@ func (s *Server) issueAuthToken(w http.ResponseWriter, userID int64) bool {
 	}
 	writeJSON(w, http.StatusOK, resp)
 	return true
+}
+
+// extractDeviceInfo 从请求头提取 platform 和 device_id
+func extractDeviceInfo(r *http.Request) (platform, deviceID string) {
+	platform = strings.TrimSpace(r.Header.Get("X-Platform"))
+	deviceID = strings.TrimSpace(r.Header.Get("X-Device-Id"))
+	return
 }
 
 func (s *Server) handleAuthWechat(w http.ResponseWriter, r *http.Request) {
@@ -166,7 +187,8 @@ func (s *Server) handleAuthWechat(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
 		return
 	}
-	s.issueAuthToken(w, u.ID)
+	platform, deviceID := extractDeviceInfo(r)
+	s.issueAuthToken(w, u.ID, platform, deviceID)
 }
 
 type authHuaweiReq struct {
@@ -199,7 +221,8 @@ func (s *Server) handleAuthHuawei(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
 		return
 	}
-	s.issueAuthToken(w, u.ID)
+	platform, deviceID := extractDeviceInfo(r)
+	s.issueAuthToken(w, u.ID, platform, deviceID)
 }
 
 type authAppleReq struct {
@@ -227,7 +250,8 @@ func (s *Server) handleAuthApple(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
 		return
 	}
-	s.issueAuthToken(w, u.ID)
+	platform, deviceID := extractDeviceInfo(r)
+	s.issueAuthToken(w, u.ID, platform, deviceID)
 }
 
 type authPhoneReq struct {
@@ -264,7 +288,8 @@ func (s *Server) handleAuthPhone(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid_credentials"})
 		return
 	}
-	s.issueAuthToken(w, u.ID)
+	platform, deviceID := extractDeviceInfo(r)
+	s.issueAuthToken(w, u.ID, platform, deviceID)
 }
 
 type linkWechatReq struct {

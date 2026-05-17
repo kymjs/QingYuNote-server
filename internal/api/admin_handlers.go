@@ -104,6 +104,11 @@ type adminRechargeRecordWire struct {
 	AmountYuan float64 `json:"amount_yuan"`
 }
 
+type adminDeviceUsageWire struct {
+	Platform string `json:"platform"`
+	LastTime string `json:"last_time"`
+}
+
 type adminUserWire struct {
 	ID                 int64                     `json:"id"`
 	RegisterSource     string                    `json:"register_source"`
@@ -115,6 +120,7 @@ type adminUserWire struct {
 	QingyuIsLifetime   bool                      `json:"qingyu_is_lifetime"`
 	TotalRechargeYuan  float64                   `json:"total_recharge_yuan"`
 	RechargeRecords    []adminRechargeRecordWire `json:"recharge_records"`
+	DeviceUsage        []adminDeviceUsageWire     `json:"device_usage"`
 }
 
 // 同一事务内创建用户与首条 OAuth identity 时 created_at 应几乎相同；手机号注册后再绑定第三方则 identity 更晚，仍视为验证码注册。
@@ -156,6 +162,11 @@ func (s *Server) handleAdminListUsers(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
 		return
 	}
+	devByUser, err := s.Store.ListAdminUserDevices(ctx, userIDs)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
+		return
+	}
 	loc, err := time.LoadLocation("Asia/Shanghai")
 	if err != nil {
 		loc = time.UTC
@@ -182,6 +193,14 @@ func (s *Server) handleAdminListUsers(w http.ResponseWriter, r *http.Request) {
 				AmountYuan: float64(r.AmountFen) / 100.0,
 			})
 		}
+		devs := devByUser[row.ID]
+		wireDevs := make([]adminDeviceUsageWire, 0, len(devs))
+		for _, d := range devs {
+			wireDevs = append(wireDevs, adminDeviceUsageWire{
+				Platform: d.Platform,
+				LastTime: d.LastActiveAt.In(loc).Format("2006-01-02 15:04:05"),
+			})
+		}
 		wire := adminUserWire{
 			ID:                row.ID,
 			RegisterSource:    adminRegisterSource(row.CreatedAt, row.FirstIdentityProv, row.FirstIdentityAt),
@@ -193,6 +212,7 @@ func (s *Server) handleAdminListUsers(w http.ResponseWriter, r *http.Request) {
 			QingyuIsLifetime:  life,
 			TotalRechargeYuan: float64(row.TotalRechargeFen) / 100.0,
 			RechargeRecords:   wireRecs,
+			DeviceUsage:       wireDevs,
 		}
 		out = append(out, wire)
 	}

@@ -108,11 +108,11 @@ func (s *Server) handleAlipayAppPaySign(w http.ResponseWriter, r *http.Request, 
 // handleAlipayPagePaySign 为待支付订单生成 alipay.trade.page.pay 收银台 URL（桌面浏览器打开）。
 // 须与「App 支付」区分：开放平台须单独签约并生效「电脑网站支付」，否则收银台页常见 insufficient-isv-permissions。
 func (s *Server) handleAlipayPagePaySign(w http.ResponseWriter, r *http.Request, uid int64) {
-	if !s.Cfg.AlipayAppPayConfigured() {
+	if !s.Cfg.AlipayPcPayConfigured() {
 		s.Cfg.LogAlipayDiagnostic("http_alipay_page_pay")
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
 			"error":   "alipay_not_configured",
-			"message": "服务端未配置 ALIPAY_* 或 PUBLIC_BASE_URL",
+			"message": "服务端未配置 ALIPAY_PC_* 或 PUBLIC_BASE_URL",
 		})
 		return
 	}
@@ -131,7 +131,7 @@ func (s *Server) handleAlipayPagePaySign(w http.ResponseWriter, r *http.Request,
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "order_not_payable"})
 		return
 	}
-	cli, err := alipayapp.NewClient(s.Cfg)
+	cli, err := alipayapp.NewPcClient(s.Cfg)
 	if err != nil {
 		log.Printf("alipay page-pay init: %v", err)
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
@@ -179,7 +179,7 @@ func (s *Server) handleAlipayPagePaySign(w http.ResponseWriter, r *http.Request,
 	}
 	writeJSON(w, http.StatusOK, map[string]string{
 		"pay_url": u,
-		"app_id":  strings.TrimSpace(s.Cfg.AlipayAppID),
+		"app_id":  strings.TrimSpace(s.Cfg.AlipayPcAppID),
 	})
 }
 
@@ -195,29 +195,43 @@ func (s *Server) handleAlipayNotify(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("fail"))
 		return
 	}
-	if !s.Cfg.AlipayCoreConfigured() {
+	hasMobile := s.Cfg.AlipayCoreConfigured()
+	hasPc := s.Cfg.AlipayPcCoreConfigured()
+	if !hasMobile && !hasPc {
 		s.Cfg.LogAlipayDiagnostic("http_alipay_notify_core_off")
-		log.Printf("alipay notify: AlipayCoreConfigured=false")
+		log.Printf("alipay notify: no alipay configured")
 		_, _ = w.Write([]byte("fail"))
 		return
 	}
-	cli, err := alipayapp.NewClient(s.Cfg)
-	if err != nil {
-		log.Printf("alipay notify client: %v", err)
-		_, _ = w.Write([]byte("fail"))
-		return
+
+	// 优先用移动端客户端验签；若 APP ID 不匹配再尝试 PC 端。
+	var cli *alipay.Client
+	var err error
+	if hasMobile {
+		cli, err = alipayapp.NewClient(s.Cfg)
+		if err == nil {
+			n, _ := cli.DecodeNotification(r.Form)
+			if n != nil && (strings.TrimSpace(n.AppId) == strings.TrimSpace(s.Cfg.AlipayAppID)) {
+				s.handleAlipayNotifyValid(w, r, cli, n)
+				return
+			}
+		}
 	}
-	n, err := cli.DecodeNotification(r.Form)
-	if err != nil {
-		log.Printf("alipay notify verify: %v", err)
-		_, _ = w.Write([]byte("fail"))
-		return
+	if hasPc {
+		cli, err = alipayapp.NewPcClient(s.Cfg)
+		if err == nil {
+			n, _ := cli.DecodeNotification(r.Form)
+			if n != nil && (strings.TrimSpace(n.AppId) == strings.TrimSpace(s.Cfg.AlipayPcAppID)) {
+				s.handleAlipayNotifyValid(w, r, cli, n)
+				return
+			}
+		}
 	}
-	if strings.TrimSpace(n.AppId) != strings.TrimSpace(s.Cfg.AlipayAppID) {
-		log.Printf("alipay notify app_id mismatch")
-		_, _ = w.Write([]byte("fail"))
-		return
-	}
+	log.Printf("alipay notify: no client matched app_id")
+	_, _ = w.Write([]byte("fail"))
+}
+
+func (s *Server) handleAlipayNotifyValid(w http.ResponseWriter, r *http.Request, cli *alipay.Client, n *alipay.Notification) {
 	ctx := r.Context()
 	outNo := strings.TrimSpace(n.OutTradeNo)
 	if outNo == "" {

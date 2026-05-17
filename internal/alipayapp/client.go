@@ -47,6 +47,38 @@ func wrapNewClientKeyError(err error) error {
 	return err
 }
 
+// NewPcClient 使用证书模式构建 PC 网站支付专用客户端（alipay.trade.page.pay）。
+func NewPcClient(cfg *config.Config) (*alipay.Client, error) {
+	if !cfg.AlipayPcCoreConfigured() {
+		return nil, errors.New("alipay pc: core not configured")
+	}
+	pk := normalizeAppPrivateKeyPEM(cfg.AlipayPcAppPrivateKey)
+	if p := strings.TrimSpace(cfg.AlipayPcAppPrivateKeyPath); p != "" {
+		b, err := os.ReadFile(p)
+		if err != nil {
+			return nil, fmt.Errorf("alipay pc: read private key file: %w", err)
+		}
+		pk = normalizeAppPrivateKeyPEM(string(b))
+	}
+	if err := validateAppPrivateKeyPEMHeader(pk); err != nil {
+		return nil, fmt.Errorf("alipay pc: invalid app private key PEM: %w", err)
+	}
+	cli, err := alipay.New(strings.TrimSpace(cfg.AlipayPcAppID), pk, cfg.AlipayProduction)
+	if err != nil {
+		return nil, fmt.Errorf("alipay pc: new client: %w", wrapNewClientKeyError(err))
+	}
+	if err := cli.LoadAppCertPublicKeyFromFile(strings.TrimSpace(cfg.AlipayPcAppCertPublicPath)); err != nil {
+		return nil, fmt.Errorf("alipay pc: load app cert: %w", err)
+	}
+	if err := cli.LoadAlipayCertPublicKeyFromFile(strings.TrimSpace(cfg.AlipayPcPlatformCertPublicPath)); err != nil {
+		return nil, fmt.Errorf("alipay pc: load alipay cert: %w", err)
+	}
+	if err := cli.LoadAliPayRootCertFromFile(strings.TrimSpace(cfg.AlipayPcRootCertPath)); err != nil {
+		return nil, fmt.Errorf("alipay pc: load root cert: %w", err)
+	}
+	return cli, nil
+}
+
 // NewClient 使用证书模式：须同时配置应用私钥、应用公钥证书、支付宝公钥证书、支付宝根证书。
 func NewClient(cfg *config.Config) (*alipay.Client, error) {
 	if !cfg.AlipayCoreConfigured() {

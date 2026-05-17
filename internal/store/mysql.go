@@ -256,3 +256,18 @@ func (s *Store) MarkOrderPaid(ctx context.Context, outTradeNo, transactionID str
 	}
 	return nil
 }
+
+// UpsertUserDeviceSession 记录或更新用户设备会话的活跃时间。
+// platform: android/ios/harmony/windows/linux/macos
+// deviceID: 客户端生成的设备唯一ID
+func (s *Store) UpsertUserDeviceSession(ctx context.Context, userID int64, platform, deviceID string) error {
+	if userID <= 0 || platform == "" || deviceID == "" {
+		return nil
+	}
+	now := time.Now().UTC()
+	q := `INSERT INTO user_device_sessions (user_id, platform, device_id, last_active_at, created_at)
+		VALUES (?, ?, ?, ?, ?)
+		ON DUPLICATE KEY UPDATE last_active_at = VALUES(last_active_at)`
+	_, err := s.DB.ExecContext(ctx, q, userID, platform, deviceID, now, now)
+	return err
+}
