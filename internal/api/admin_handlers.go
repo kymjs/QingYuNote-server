@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -343,6 +344,42 @@ func (s *Server) handleAdminCreateRedemptionCodes(w http.ResponseWriter, r *http
 	writeJSON(w, http.StatusOK, adminCreateRedemptionResp{PlanID: plan, Codes: codes})
 }
 
+const adminDefaultPasswordHash = "$2a$10$URwavndXJnkQhbmoRw4u7eEGeg2l9FuuDQDfSwfPeafvmB7kQ5uD6"
+
+func (s *Server) handleAdminCreateUser(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		UserID int64  `json:"user_id"`
+		Phone  string `json:"phone"`
+	}
+	if err := readJSON(r, &req); err != nil || req.UserID <= 0 || strings.TrimSpace(req.Phone) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_body"})
+		return
+	}
+	phone := strings.TrimSpace(req.Phone)
+	if len(phone) != 11 || phone[0] != '1' {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_phone"})
+		return
+	}
+	ctx := r.Context()
+	err := s.Store.AdminCreateUser(ctx, req.UserID, phone, adminDefaultPasswordHash)
+	if err != nil {
+		switch {
+		case errors.Is(err, store.ErrUserIDExists):
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "user_id_exists"})
+		case errors.Is(err, store.ErrPhoneAlreadyRegistered):
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "phone_already_registered"})
+		default:
+			if err.Error() == "invalid_phone" {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_phone"})
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
 func (s *Server) handleAdminSetUserPhone(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		UserID int64  `json:"user_id"`
@@ -373,10 +410,8 @@ func (s *Server) handleAdminResetUserPassword(w http.ResponseWriter, r *http.Req
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_body"})
 		return
 	}
-	// 固定重置密码: $2a$10$URwavndXJnkQhbmoRw4u7eEGeg2l9FuuDQDfSwfPeafvmB7kQ5uD6
-	fixedHash := "$2a$10$URwavndXJnkQhbmoRw4u7eEGeg2l9FuuDQDfSwfPeafvmB7kQ5uD6"
 	ctx := r.Context()
-	if err := s.Store.ResetUserPassword(ctx, req.UserID, fixedHash); err != nil {
+	if err := s.Store.ResetUserPassword(ctx, req.UserID, adminDefaultPasswordHash); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
 		return
 	}

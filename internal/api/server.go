@@ -83,6 +83,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/admin/auth/login", s.handleAdminLogin)
 	mux.HandleFunc("GET /api/v1/admin/users", s.adminAuth(s.handleAdminListUsers))
 	mux.HandleFunc("POST /api/v1/admin/redemption-codes", s.adminAuth(s.handleAdminCreateRedemptionCodes))
+	mux.HandleFunc("POST /api/v1/admin/users/create", s.adminAuth(s.handleAdminCreateUser))
 	mux.HandleFunc("POST /api/v1/admin/users/phone", s.adminAuth(s.handleAdminSetUserPhone))
 	mux.HandleFunc("POST /api/v1/admin/users/password/reset", s.adminAuth(s.handleAdminResetUserPassword))
 	mux.HandleFunc("DELETE /api/v1/admin/users", s.adminAuth(s.handleAdminDeleteUser))

@@ -3,12 +3,16 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/kymjs/noteapi/internal/config"
 )
+
+// ErrUserIDExists 指定用户 ID 已存在，无法创建。
+var ErrUserIDExists = errors.New("user_id_exists")
 
 // AdminUserRow 管理后台用户列表行。
 type AdminUserRow struct {
@@ -141,6 +145,53 @@ type AdminRechargeRecordRow struct {
 	Channel   string
 	CreatedAt time.Time
 	AmountFen int64
+}
+
+// AdminCreateUser 在指定 ID 不存在时创建用户（手机号 + 初始密码哈希）。
+func (s *Store) AdminCreateUser(ctx context.Context, userID int64, rawPhone, passwordHash string) error {
+	if userID <= 0 {
+		return errors.New("invalid_user_id")
+	}
+	digits := NormalizeLoginPhoneDigits(rawPhone)
+	if digits == "" {
+		return errors.New("invalid_phone")
+	}
+	if passwordHash == "" {
+		return errors.New("invalid_password_hash")
+	}
+
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var one int
+	err = tx.QueryRowContext(ctx, `SELECT 1 FROM users WHERE id = ? LIMIT 1`, userID).Scan(&one)
+	if err == nil {
+		return ErrUserIDExists
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if uid, err := s.findUserIDByPhoneTx(ctx, tx, digits); err == nil && uid > 0 {
+		return ErrPhoneAlreadyRegistered
+	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+
+	folderKey := fmt.Sprintf("u%d", userID)
+	now := time.Now().UTC()
+	_, err = tx.ExecContext(ctx, `
+INSERT INTO users (
+  id, folder_key, wechat_openid, created_at, updated_at,
+  display_name, avatar_url, phone, email, password_hash
+) VALUES (?, ?, NULL, ?, ?, NULL, NULL, ?, NULL, ?)`,
+		userID, folderKey, now, now, digits, passwordHash)
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) SetUserPhone(ctx context.Context, userID int64, phone string) error {
