@@ -143,6 +143,47 @@ type AdminRechargeRecordRow struct {
 	AmountFen int64
 }
 
+func (s *Store) SetUserPhone(ctx context.Context, userID int64, phone string) error {
+	_, err := s.DB.ExecContext(ctx, `UPDATE users SET phone = ? WHERE id = ?`, phone, userID)
+	return err
+}
+
+func (s *Store) ResetUserPassword(ctx context.Context, userID int64, hash string) error {
+	_, err := s.DB.ExecContext(ctx, `UPDATE users SET password_hash = ? WHERE id = ?`, hash, userID)
+	return err
+}
+
+func (s *Store) DeleteUser(ctx context.Context, userID int64) error {
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+	if _, err = tx.ExecContext(ctx, `DELETE FROM membership_recharge_records WHERE user_id = ?`, userID); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `DELETE FROM orders WHERE user_id = ?`, userID); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `DELETE FROM subscriptions WHERE user_id = ?`, userID); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `DELETE FROM user_device_sessions WHERE user_id = ?`, userID); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `DELETE FROM user_identities WHERE user_id = ?`, userID); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, userID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // ListAdminUserRechargeRecords 按用户查询 membership_recharge_records，用于管理后台「充值记录」列。
 func (s *Store) ListAdminUserRechargeRecords(ctx context.Context, userIDs []int64) (map[int64][]AdminRechargeRecordRow, error) {
 	uniq := make([]int64, 0, len(userIDs))
