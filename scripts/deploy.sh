@@ -235,7 +235,7 @@ cmd_migrate() {
     run_sql "${f}"
   done
   unset MYSQL_PWD
-  log "迁移完成（共 ${#sorted[@]} 个 SQL；003 等脚本可按列检测跳过重复 ALTER）"
+  log "迁移完成（共 ${#sorted[@]} 个 SQL；003/008 等脚本可按列检测跳过重复 ALTER）"
 }
 
 cmd_rollback() {

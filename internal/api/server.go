@@ -112,11 +112,11 @@ func (s *Server) auth(next func(http.ResponseWriter, *http.Request, int64)) http
 			http.Error(w, `{"error":"invalid_token"}`, http.StatusUnauthorized)
 			return
 		}
-		platform, deviceID := extractDeviceInfo(r)
+		platform, deviceID, appVersion := extractDeviceInfo(r)
 		if platform != "" && deviceID != "" {
 			go func() {
 				ctx := context.Background()
-				_ = s.Store.UpsertUserDeviceSession(ctx, uid, platform, deviceID)
+				_ = s.Store.UpsertUserDeviceSession(ctx, uid, platform, deviceID, appVersion)
 			}()
 		}
 		next(w, r, uid)
@@ -145,7 +145,7 @@ type authLoginResp struct {
 	UserID      int64  `json:"user_id"`
 }
 
-func (s *Server) issueAuthToken(w http.ResponseWriter, userID int64, platform, deviceID string) bool {
+func (s *Server) issueAuthToken(w http.ResponseWriter, userID int64, platform, deviceID, appVersion string) bool {
 	tok, err := auth.SignAccessToken(userID, s.Cfg.JWTSecret, 7*24*time.Hour)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "token_failed"})
@@ -155,7 +155,7 @@ func (s *Server) issueAuthToken(w http.ResponseWriter, userID int64, platform, d
 	if platform != "" && deviceID != "" {
 		go func() {
 			ctx := context.Background()
-			_ = s.Store.UpsertUserDeviceSession(ctx, userID, platform, deviceID)
+			_ = s.Store.UpsertUserDeviceSession(ctx, userID, platform, deviceID, appVersion)
 		}()
 	}
 	resp := authLoginResp{
@@ -167,11 +167,23 @@ func (s *Server) issueAuthToken(w http.ResponseWriter, userID int64, platform, d
 	return true
 }
 
-// extractDeviceInfo 从请求头提取 platform 和 device_id
-func extractDeviceInfo(r *http.Request) (platform, deviceID string) {
+// extractDeviceInfo 从请求头提取 platform、device_id 与 app_version
+func extractDeviceInfo(r *http.Request) (platform, deviceID, appVersion string) {
 	platform = strings.TrimSpace(r.Header.Get("X-Platform"))
 	deviceID = strings.TrimSpace(r.Header.Get("X-Device-Id"))
+	appVersion = clampAppVersion(strings.TrimSpace(r.Header.Get("X-App-Version")))
 	return
+}
+
+func clampAppVersion(v string) string {
+	if v == "" {
+		return ""
+	}
+	const maxLen = 32
+	if len(v) > maxLen {
+		return v[:maxLen]
+	}
+	return v
 }
 
 func (s *Server) handleAuthWechat(w http.ResponseWriter, r *http.Request) {
@@ -191,8 +203,8 @@ func (s *Server) handleAuthWechat(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
 		return
 	}
-	platform, deviceID := extractDeviceInfo(r)
-	s.issueAuthToken(w, u.ID, platform, deviceID)
+	platform, deviceID, appVersion := extractDeviceInfo(r)
+	s.issueAuthToken(w, u.ID, platform, deviceID, appVersion)
 }
 
 type authHuaweiReq struct {
@@ -225,8 +237,8 @@ func (s *Server) handleAuthHuawei(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
 		return
 	}
-	platform, deviceID := extractDeviceInfo(r)
-	s.issueAuthToken(w, u.ID, platform, deviceID)
+	platform, deviceID, appVersion := extractDeviceInfo(r)
+	s.issueAuthToken(w, u.ID, platform, deviceID, appVersion)
 }
 
 type authAppleReq struct {
@@ -254,8 +266,8 @@ func (s *Server) handleAuthApple(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
 		return
 	}
-	platform, deviceID := extractDeviceInfo(r)
-	s.issueAuthToken(w, u.ID, platform, deviceID)
+	platform, deviceID, appVersion := extractDeviceInfo(r)
+	s.issueAuthToken(w, u.ID, platform, deviceID, appVersion)
 }
 
 type authPhoneReq struct {
@@ -292,8 +304,8 @@ func (s *Server) handleAuthPhone(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid_credentials"})
 		return
 	}
-	platform, deviceID := extractDeviceInfo(r)
-	s.issueAuthToken(w, u.ID, platform, deviceID)
+	platform, deviceID, appVersion := extractDeviceInfo(r)
+	s.issueAuthToken(w, u.ID, platform, deviceID, appVersion)
 }
 
 type linkWechatReq struct {

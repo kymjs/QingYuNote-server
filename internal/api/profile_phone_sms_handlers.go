@@ -3,13 +3,18 @@ package api
 import (
 	"log"
 	"net/http"
+	"strings"
+
+	"github.com/dchest/captcha"
 
 	"github.com/kymjs/noteapi/internal/aliyunsms"
 	"github.com/kymjs/noteapi/internal/store"
 )
 
 type sendProfilePhoneSmsReq struct {
-	Phone string `json:"phone"`
+	Phone       string `json:"phone"`
+	CaptchaID   string `json:"captcha_id"`
+	CaptchaCode string `json:"captcha_code"`
 }
 
 // handleSendProfilePhoneSms POST /api/v1/me/profile/phone/sms/send
@@ -26,6 +31,16 @@ func (s *Server) handleSendProfilePhoneSms(w http.ResponseWriter, r *http.Reques
 	var req sendProfilePhoneSmsReq
 	if err := readJSON(r, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_body"})
+		return
+	}
+	cid := strings.TrimSpace(req.CaptchaID)
+	cc := strings.TrimSpace(req.CaptchaCode)
+	if cid == "" || cc == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "captcha_required"})
+		return
+	}
+	if !captcha.VerifyString(cid, cc) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "captcha_invalid"})
 		return
 	}
 	digits := store.NormalizeLoginPhoneDigits(req.Phone)

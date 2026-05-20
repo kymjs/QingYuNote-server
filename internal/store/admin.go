@@ -71,6 +71,7 @@ ORDER BY u.id DESC`
 // AdminDeviceSession 管理后台展示的用户设备使用信息。
 type AdminDeviceSession struct {
 	Platform     string
+	AppVersion   string
 	LastActiveAt time.Time
 }
 
@@ -99,7 +100,7 @@ func (s *Store) ListAdminUserDevices(ctx context.Context, userIDs []int64) (map[
 		args[i] = id
 	}
 	q := fmt.Sprintf(`
-SELECT user_id, platform, last_active_at
+SELECT user_id, platform, app_version, last_active_at
 FROM user_device_sessions
 WHERE user_id IN (%s)
 ORDER BY user_id ASC, last_active_at DESC`, strings.Join(ph, ","))
@@ -111,13 +112,19 @@ ORDER BY user_id ASC, last_active_at DESC`, strings.Join(ph, ","))
 	for rows.Next() {
 		var uid int64
 		var platform string
+		var appVersion sql.NullString
 		var lastActive time.Time
-		if err := rows.Scan(&uid, &platform, &lastActive); err != nil {
+		if err := rows.Scan(&uid, &platform, &appVersion, &lastActive); err != nil {
 			return nil, err
+		}
+		ver := ""
+		if appVersion.Valid {
+			ver = strings.TrimSpace(appVersion.String)
 		}
 		if out[uid] == nil {
 			out[uid] = append(out[uid], AdminDeviceSession{
 				Platform:     platform,
+				AppVersion:   ver,
 				LastActiveAt: lastActive,
 			})
 		} else {
@@ -132,6 +139,7 @@ ORDER BY user_id ASC, last_active_at DESC`, strings.Join(ph, ","))
 			if !seen {
 				out[uid] = append(out[uid], AdminDeviceSession{
 					Platform:     platform,
+					AppVersion:   ver,
 					LastActiveAt: lastActive,
 				})
 			}

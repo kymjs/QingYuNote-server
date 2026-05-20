@@ -24,7 +24,7 @@ export PUBLIC_BASE_URL='https://noteapi.kymjs.com'
 mysql "$MYSQL_DSN" < migrations/001_init.sql
 mysql "$MYSQL_DSN" < migrations/002_user_identities.sql
 mysql "$MYSQL_DSN" < migrations/003_user_profile.sql
-# …后续 004、005 等见 migrations/ 目录，或统一：./scripts/deploy.sh migrate
+# …后续 004–008 等见 migrations/ 目录，或统一：./scripts/deploy.sh migrate
 ```
 
 多登录方式（微信 / 华为 / Apple）共用一个 `users` 行，绑定关系在表 `user_identities`；首次升级会按历史 `wechat_openid` 回填微信身份。

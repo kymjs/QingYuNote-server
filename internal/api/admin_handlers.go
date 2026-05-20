@@ -106,8 +106,9 @@ type adminRechargeRecordWire struct {
 }
 
 type adminDeviceUsageWire struct {
-	Platform string `json:"platform"`
-	LastTime string `json:"last_time"`
+	Platform   string `json:"platform"`
+	AppVersion string `json:"app_version,omitempty"`
+	LastTime   string `json:"last_time"`
 }
 
 type adminUserWire struct {
@@ -198,8 +199,9 @@ func (s *Server) handleAdminListUsers(w http.ResponseWriter, r *http.Request) {
 		wireDevs := make([]adminDeviceUsageWire, 0, len(devs))
 		for _, d := range devs {
 			wireDevs = append(wireDevs, adminDeviceUsageWire{
-				Platform: d.Platform,
-				LastTime: d.LastActiveAt.In(loc).Format("2006-01-02 15:04:05"),
+				Platform:   d.Platform,
+				AppVersion: d.AppVersion,
+				LastTime:   d.LastActiveAt.In(loc).Format("2006-01-02 15:04:05"),
 			})
 		}
 		wire := adminUserWire{

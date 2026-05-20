@@ -167,6 +167,6 @@ func (s *Server) handleRegisterConfirm(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
 		return
 	}
-	platform, deviceID := extractDeviceInfo(r)
-	s.issueAuthToken(w, u.ID, platform, deviceID)
+	platform, deviceID, appVersion := extractDeviceInfo(r)
+	s.issueAuthToken(w, u.ID, platform, deviceID, appVersion)
 }
