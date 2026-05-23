@@ -91,6 +91,11 @@ type Config struct {
 	AdminPassword          string
 	RedemptionIssueSecret  string
 	FeishuRedemptionWebhook string
+
+	// MiniMax Token Plan：客户端 AI 创建标签（GET /api/v1/me/ai-tag-config 下发，勿提交仓库）。
+	MiniMaxTokenPlanKey string
+	MiniMaxModel        string
+	MiniMaxBaseURL      string
 }
 
 func getenv(key, def string) string {
@@ -179,6 +184,10 @@ func Load() *Config {
 		AdminPassword:           getenv("ADMIN_PASSWORD", ""),
 		RedemptionIssueSecret:   getenv("REDEMPTION_ISSUE_SECRET", ""),
 		FeishuRedemptionWebhook: getenv("FEISHU_REDEMPTION_WEBHOOK_URL", ""),
+
+		MiniMaxTokenPlanKey: getenv("MINIMAX_TOKEN_PLAN_KEY", ""),
+		MiniMaxModel:        getenv("MINIMAX_MODEL", "MiniMax-M2.7"),
+		MiniMaxBaseURL:      strings.TrimRight(getenv("MINIMAX_BASE_URL", defaultMiniMaxBaseURL), "/"),
 	}
 
 	if c.JWTSecret == "" {
@@ -388,6 +397,14 @@ func (c *Config) AdminConfigured() bool {
 // RedemptionIssueConfigured 为 true 时允许通过管理后台签发兑换码。
 func (c *Config) RedemptionIssueConfigured() bool {
 	return strings.TrimSpace(c.RedemptionIssueSecret) != ""
+}
+
+const defaultMiniMaxBaseURL = "https://api.minimaxi.com/v1"
+
+// MiniMaxConfigured 为 true 时允许向已登录用户下发 AI 标签配置。
+func (c *Config) MiniMaxConfigured() bool {
+	return strings.TrimSpace(c.MiniMaxTokenPlanKey) != "" &&
+		strings.TrimSpace(c.MiniMaxModel) != ""
 }
 
 func ParseOrderIDParam(v string) int64 {

@@ -66,6 +66,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/me/rebind/identity/confirm", s.auth(s.handleConfirmIdentityRebind))
 	mux.HandleFunc("GET /api/v1/me/subscription", s.auth(s.handleSubscription))
 	mux.HandleFunc("GET /api/v1/me/profile", s.auth(s.handleGetProfile))
+	mux.HandleFunc("GET /api/v1/me/ai-tag-config", s.auth(s.handleGetAiTagConfig))
 	mux.HandleFunc("POST /api/v1/me/redeem", s.auth(s.handleRedeem))
 	mux.HandleFunc("PATCH /api/v1/me/profile", s.auth(s.handlePatchProfile))
 	mux.HandleFunc("POST /api/v1/me/profile/phone/sms/send", s.auth(s.handleSendProfilePhoneSms))
