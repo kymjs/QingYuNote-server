@@ -105,8 +105,9 @@ type patchProfileReq struct {
 	UnbindPhoneFromOther *bool `json:"unbind_phone_from_other"`
 }
 
+// handlePatchProfile 更新资料；PATCH 与 POST 同路径同 body（POST 供 Harmony 等不支持 PATCH 的客户端）。
 func (s *Server) handlePatchProfile(w http.ResponseWriter, r *http.Request, uid int64) {
-	if r.Method != http.MethodPatch {
+	if r.Method != http.MethodPatch && r.Method != http.MethodPost {
 		http.Error(w, `{"error":"method_not_allowed"}`, http.StatusMethodNotAllowed)
 		return
 	}
