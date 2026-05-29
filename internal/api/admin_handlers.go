@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -150,11 +151,23 @@ func adminRegisterSource(userCreated time.Time, prov sql.NullString, identAt sql
 
 func (s *Server) handleAdminListUsers(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	rows, err := s.Store.ListAdminUsers(ctx)
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	sortBy := strings.TrimSpace(r.URL.Query().Get("sort"))
+	order := strings.TrimSpace(r.URL.Query().Get("order"))
+	list, err := s.Store.ListAdminUsers(ctx, store.AdminUsersListParams{
+		Page:  page,
+		Sort:  sortBy,
+		Order: order,
+	})
 	if err != nil {
+		if strings.Contains(err.Error(), "invalid sort") {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_sort"})
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
 		return
 	}
+	rows := list.Rows
 	userIDs := make([]int64, len(rows))
 	for i, row := range rows {
 		userIDs[i] = row.ID
@@ -219,7 +232,19 @@ func (s *Server) handleAdminListUsers(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, wire)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"users": out})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"users":     out,
+		"total":     list.Total,
+		"page":      normalizeAdminUsersPage(page),
+		"page_size": store.AdminUsersPageSize,
+	})
+}
+
+func normalizeAdminUsersPage(page int) int {
+	if page < 1 {
+		return 1
+	}
+	return page
 }
 
 type adminCreateRedemptionReq struct {

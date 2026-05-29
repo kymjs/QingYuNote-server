@@ -28,14 +28,96 @@ type AdminUserRow struct {
 	TotalRechargeFen    int64
 }
 
-// ListAdminUsers 返回全部注册用户及订阅、累计充值（已支付订单金额之和，单位分）。
-func (s *Store) ListAdminUsers(ctx context.Context) ([]AdminUserRow, error) {
-	q := `
+const AdminUsersPageSize = 100
+
+// AdminUsersListParams 管理后台用户列表分页与排序参数。
+type AdminUsersListParams struct {
+	Page  int
+	Sort  string // id | last_used | recharge | app_version | qingyu
+	Order string // asc | desc
+}
+
+// AdminUsersListResult 分页用户列表及总数。
+type AdminUsersListResult struct {
+	Rows  []AdminUserRow
+	Total int64
+}
+
+func normalizeAdminUsersListParams(p AdminUsersListParams) AdminUsersListParams {
+	if p.Page < 1 {
+		p.Page = 1
+	}
+	p.Sort = strings.ToLower(strings.TrimSpace(p.Sort))
+	if p.Sort == "" {
+		p.Sort = "id"
+	}
+	p.Order = strings.ToLower(strings.TrimSpace(p.Order))
+	if p.Order != "asc" {
+		p.Order = "desc"
+	}
+	return p
+}
+
+func adminUsersOrderExpr(sort, order string) (string, error) {
+	desc := order == "desc"
+	switch sort {
+	case "id":
+		if desc {
+			return "u.id DESC", nil
+		}
+		return "u.id ASC", nil
+	case "last_used":
+		if desc {
+			return "dev.last_used_at IS NULL, dev.last_used_at DESC, u.id DESC", nil
+		}
+		return "dev.last_used_at IS NULL DESC, dev.last_used_at ASC, u.id ASC", nil
+	case "recharge":
+		if desc {
+			return "COALESCE(paid.total_fen, 0) DESC, u.id DESC", nil
+		}
+		return "COALESCE(paid.total_fen, 0) ASC, u.id ASC", nil
+	case "app_version":
+		latestVer := `(SELECT d.app_version FROM user_device_sessions d WHERE d.user_id = u.id ORDER BY d.last_active_at DESC, d.id DESC LIMIT 1)`
+		if desc {
+			return fmt.Sprintf("%s IS NULL, %s DESC, u.id DESC", latestVer, latestVer), nil
+		}
+		return fmt.Sprintf("%s IS NULL DESC, %s ASC, u.id ASC", latestVer, latestVer), nil
+	case "qingyu":
+		qingyuExpr := `CASE
+    WHEN COALESCE(s.is_lifetime, 0) = 1 THEN 1
+    WHEN s.expires_at IS NOT NULL AND DATE(s.expires_at) >= CURDATE() THEN 1
+    ELSE 0
+  END`
+		if desc {
+			return qingyuExpr + " DESC, u.id DESC", nil
+		}
+		return qingyuExpr + " ASC, u.id ASC", nil
+	default:
+		return "", fmt.Errorf("invalid sort: %s", sort)
+	}
+}
+
+// CountAdminUsers 返回注册用户总数。
+func (s *Store) CountAdminUsers(ctx context.Context) (int64, error) {
+	var total int64
+	err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&total)
+	return total, err
+}
+
+// ListAdminUsers 分页返回注册用户及订阅、累计充值（已支付订单金额之和，单位分）。
+func (s *Store) ListAdminUsers(ctx context.Context, p AdminUsersListParams) (AdminUsersListResult, error) {
+	p = normalizeAdminUsersListParams(p)
+	orderExpr, err := adminUsersOrderExpr(p.Sort, p.Order)
+	if err != nil {
+		return AdminUsersListResult{}, err
+	}
+	offset := (p.Page - 1) * AdminUsersPageSize
+	q := fmt.Sprintf(`
 SELECT u.id, u.display_name, u.avatar_url, u.phone, u.created_at,
        (SELECT i.provider FROM user_identities i WHERE i.user_id = u.id ORDER BY i.created_at ASC LIMIT 1),
        (SELECT i.created_at FROM user_identities i WHERE i.user_id = u.id ORDER BY i.created_at ASC LIMIT 1),
        s.expires_at, COALESCE(s.is_lifetime, 0),
-       COALESCE(paid.total_fen, 0)
+       COALESCE(paid.total_fen, 0) AS total_recharge_fen
 FROM users u
 LEFT JOIN subscriptions s ON s.user_id = u.id
 LEFT JOIN (
@@ -44,10 +126,16 @@ LEFT JOIN (
   WHERE status = 'paid'
   GROUP BY user_id
 ) paid ON paid.user_id = u.id
-ORDER BY u.id DESC`
-	rows, err := s.DB.QueryContext(ctx, q)
+LEFT JOIN (
+  SELECT user_id, MAX(last_active_at) AS last_used_at
+  FROM user_device_sessions
+  GROUP BY user_id
+) dev ON dev.user_id = u.id
+ORDER BY %s
+LIMIT ? OFFSET ?`, orderExpr)
+	rows, err := s.DB.QueryContext(ctx, q, AdminUsersPageSize, offset)
 	if err != nil {
-		return nil, err
+		return AdminUsersListResult{}, err
 	}
 	defer rows.Close()
 
@@ -60,12 +148,19 @@ ORDER BY u.id DESC`
 			&r.FirstIdentityProv, &r.FirstIdentityAt,
 			&r.ExpiresAt, &life, &r.TotalRechargeFen,
 		); err != nil {
-			return nil, err
+			return AdminUsersListResult{}, err
 		}
 		r.IsLifetime = life != 0
 		out = append(out, r)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return AdminUsersListResult{}, err
+	}
+	total, err := s.CountAdminUsers(ctx)
+	if err != nil {
+		return AdminUsersListResult{}, err
+	}
+	return AdminUsersListResult{Rows: out, Total: total}, nil
 }
 
 // AdminDeviceSession 管理后台展示的用户设备使用信息。
