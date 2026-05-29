@@ -232,11 +232,17 @@ func (s *Server) handleAdminListUsers(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, wire)
 	}
+	activeToday, err := s.Store.CountAdminUsersActiveToday(ctx, now)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"users":     out,
-		"total":     list.Total,
-		"page":      normalizeAdminUsersPage(page),
-		"page_size": store.AdminUsersPageSize,
+		"users":        out,
+		"total":        list.Total,
+		"active_today": activeToday,
+		"page":         normalizeAdminUsersPage(page),
+		"page_size":    store.AdminUsersPageSize,
 	})
 }
 

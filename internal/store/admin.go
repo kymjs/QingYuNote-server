@@ -104,6 +104,23 @@ func (s *Store) CountAdminUsers(ctx context.Context) (int64, error) {
 	return total, err
 }
 
+// CountAdminUsersActiveToday 返回指定时刻所在自然日（Asia/Shanghai）内有打开或使用客户端的去重用户数。
+func (s *Store) CountAdminUsersActiveToday(ctx context.Context, now time.Time) (int64, error) {
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		loc = time.UTC
+	}
+	y, m, d := now.In(loc).Date()
+	start := time.Date(y, m, d, 0, 0, 0, 0, loc).UTC()
+	end := start.Add(24 * time.Hour)
+	var n int64
+	err = s.DB.QueryRowContext(ctx, `
+SELECT COUNT(DISTINCT user_id)
+FROM user_device_sessions
+WHERE last_active_at >= ? AND last_active_at < ?`, start, end).Scan(&n)
+	return n, err
+}
+
 // ListAdminUsers 分页返回注册用户及订阅、累计充值（已支付订单金额之和，单位分）。
 func (s *Store) ListAdminUsers(ctx context.Context, p AdminUsersListParams) (AdminUsersListResult, error) {
 	p = normalizeAdminUsersListParams(p)
