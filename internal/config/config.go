@@ -93,9 +93,10 @@ type Config struct {
 	FeishuRedemptionWebhook string
 
 	// MiniMax Token Plan：客户端 AI 创建标签（GET /api/v1/me/ai-tag-config 下发，勿提交仓库）。
-	MiniMaxTokenPlanKey string
-	MiniMaxModel        string
-	MiniMaxBaseURL      string
+	MiniMaxTokenPlanKey   string
+	MiniMaxModel          string
+	MiniMaxBaseURL        string
+	MiniMaxReasoningEffort string
 }
 
 func getenv(key, def string) string {
@@ -185,9 +186,10 @@ func Load() *Config {
 		RedemptionIssueSecret:   getenv("REDEMPTION_ISSUE_SECRET", ""),
 		FeishuRedemptionWebhook: getenv("FEISHU_REDEMPTION_WEBHOOK_URL", ""),
 
-		MiniMaxTokenPlanKey: getenv("MINIMAX_TOKEN_PLAN_KEY", ""),
-		MiniMaxModel:        getenv("MINIMAX_MODEL", "MiniMax-M2.7"),
-		MiniMaxBaseURL:      strings.TrimRight(getenv("MINIMAX_BASE_URL", defaultMiniMaxBaseURL), "/"),
+		MiniMaxTokenPlanKey:    getenv("MINIMAX_TOKEN_PLAN_KEY", ""),
+		MiniMaxModel:           getenv("MINIMAX_MODEL", "MiniMax-M2.7"),
+		MiniMaxBaseURL:         strings.TrimRight(getenv("MINIMAX_BASE_URL", defaultMiniMaxBaseURL), "/"),
+		MiniMaxReasoningEffort: getenv("MINIMAX_REASONING_EFFORT", ""),
 	}
 
 	if c.JWTSecret == "" {
@@ -405,6 +407,19 @@ const defaultMiniMaxBaseURL = "https://api.minimaxi.com/v1"
 func (c *Config) MiniMaxConfigured() bool {
 	return strings.TrimSpace(c.MiniMaxTokenPlanKey) != "" &&
 		strings.TrimSpace(c.MiniMaxModel) != ""
+}
+
+// MiniMaxReasoningEffortForModel 返回下发给客户端的 reasoning.effort。
+// 显式配置 MINIMAX_REASONING_EFFORT 时优先；否则 MiniMax-M3 默认 none（关闭推理输出）。
+func (c *Config) MiniMaxReasoningEffortForModel() string {
+	if v := strings.TrimSpace(c.MiniMaxReasoningEffort); v != "" {
+		return v
+	}
+	model := strings.ToLower(strings.TrimSpace(c.MiniMaxModel))
+	if strings.Contains(model, "m3") {
+		return "none"
+	}
+	return ""
 }
 
 func ParseOrderIDParam(v string) int64 {

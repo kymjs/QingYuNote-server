@@ -5,10 +5,15 @@ import (
 	"strings"
 )
 
+type aiTagReasoningWire struct {
+	Effort string `json:"effort"`
+}
+
 type aiTagConfigWire struct {
-	TokenPlanKey string `json:"token_plan_key"`
-	Model        string `json:"model"`
-	BaseURL      string `json:"base_url"`
+	TokenPlanKey string                `json:"token_plan_key"`
+	Model        string                `json:"model"`
+	BaseURL      string                `json:"base_url"`
+	Reasoning    *aiTagReasoningWire   `json:"reasoning,omitempty"`
 }
 
 func (s *Server) handleGetAiTagConfig(w http.ResponseWriter, r *http.Request, _ int64) {
@@ -20,9 +25,13 @@ func (s *Server) handleGetAiTagConfig(w http.ResponseWriter, r *http.Request, _ 
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "minimax_not_configured"})
 		return
 	}
-	writeJSON(w, http.StatusOK, aiTagConfigWire{
+	wire := aiTagConfigWire{
 		TokenPlanKey: s.Cfg.MiniMaxTokenPlanKey,
 		Model:        s.Cfg.MiniMaxModel,
 		BaseURL:      strings.TrimRight(s.Cfg.MiniMaxBaseURL, "/"),
-	})
+	}
+	if effort := s.Cfg.MiniMaxReasoningEffortForModel(); effort != "" {
+		wire.Reasoning = &aiTagReasoningWire{Effort: effort}
+	}
+	writeJSON(w, http.StatusOK, wire)
 }
