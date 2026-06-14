@@ -302,8 +302,8 @@ func planTitleCN(plan string) string {
 }
 
 func feishuRedemptionBody(plan, code string) string {
-	return fmt.Sprintf("【轻羽云兑换码】\n类型：%s（%s）\n兑换码：%s\n（仅限一次性使用，请勿转发给无关人员）",
-		planTitleCN(plan), plan, code)
+	return fmt.Sprintf("【轻羽云兑换码】\n类型：%s\n兑换码：%s\n（打开APP->左上角菜单->个人信息->兑换码，输入兑换使用）",
+		planTitleCN(plan), code)
 }
 
 type feishuTextPayload struct {
