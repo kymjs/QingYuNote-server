@@ -113,17 +113,17 @@ type adminDeviceUsageWire struct {
 }
 
 type adminUserWire struct {
-	ID                 int64                     `json:"id"`
-	RegisterSource     string                    `json:"register_source"`
-	Phone              *string                   `json:"phone"`
-	Nickname           *string                   `json:"nickname"`
-	AvatarURL          *string                   `json:"avatar_url"`
-	QingyuActive       bool                      `json:"qingyu_active"`
-	QingyuExpiresAt    string                    `json:"qingyu_expires_at,omitempty"`
-	QingyuIsLifetime   bool                      `json:"qingyu_is_lifetime"`
-	TotalRechargeYuan  float64                   `json:"total_recharge_yuan"`
-	RechargeRecords    []adminRechargeRecordWire `json:"recharge_records"`
-	DeviceUsage        []adminDeviceUsageWire     `json:"device_usage"`
+	ID                int64                     `json:"id"`
+	RegisterSource    string                    `json:"register_source"`
+	Phone             *string                   `json:"phone"`
+	Nickname          *string                   `json:"nickname"`
+	AvatarURL         *string                   `json:"avatar_url"`
+	QingyuActive      bool                      `json:"qingyu_active"`
+	QingyuExpiresAt   string                    `json:"qingyu_expires_at,omitempty"`
+	QingyuIsLifetime  bool                      `json:"qingyu_is_lifetime"`
+	TotalRechargeYuan float64                   `json:"total_recharge_yuan"`
+	RechargeRecords   []adminRechargeRecordWire `json:"recharge_records"`
+	DeviceUsage       []adminDeviceUsageWire    `json:"device_usage"`
 }
 
 // 同一事务内创建用户与首条 OAuth identity 时 created_at 应几乎相同；手机号注册后再绑定第三方则 identity 更晚，仍视为验证码注册。
@@ -302,7 +302,7 @@ func planTitleCN(plan string) string {
 }
 
 func feishuRedemptionBody(plan, code string) string {
-	return fmt.Sprintf("【轻羽云兑换码】\n类型：%s\n兑换码：%s\n（打开APP->左上角菜单->个人信息->兑换码，输入兑换使用）",
+	return fmt.Sprintf("【轻羽云兑换码】\n类型：%s\n兑换码：%s\n打开APP->左上角菜单->个人信息->兑换码，输入兑换使用",
 		planTitleCN(plan), code)
 }
 
