@@ -74,6 +74,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/me/password/sms/send", s.auth(s.handleSendPasswordSms))
 	mux.HandleFunc("POST /api/v1/me/avatar", s.auth(s.handlePostAvatar))
 	mux.HandleFunc("DELETE /api/v1/me", s.auth(s.handleDeleteAccount))
+	mux.HandleFunc("PUT /api/v1/me/sync-settings", s.auth(s.handlePutSyncSettings))
+	mux.HandleFunc("POST /api/v1/me/sync-settings", s.auth(s.handlePutSyncSettings)) // Harmony @ohos.net.http 无 PUT
 	mux.HandleFunc("GET /api/v1/qingyu/webdav", s.auth(s.handleQingyuWebDAV))
 	mux.HandleFunc("POST /api/v1/orders", s.auth(s.handleCreateOrder))
 	mux.HandleFunc("POST /api/v1/orders/{id}/alipay/app-pay", s.auth(s.handleAlipayAppPaySign))

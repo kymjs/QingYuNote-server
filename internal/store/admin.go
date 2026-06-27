@@ -346,6 +346,9 @@ func (s *Store) DeleteUser(ctx context.Context, userID int64) error {
 	if _, err = tx.ExecContext(ctx, `DELETE FROM user_device_sessions WHERE user_id = ?`, userID); err != nil {
 		return err
 	}
+	if _, err = tx.ExecContext(ctx, `DELETE FROM user_sync_settings WHERE user_id = ?`, userID); err != nil {
+		return err
+	}
 	if _, err = tx.ExecContext(ctx, `DELETE FROM user_identities WHERE user_id = ?`, userID); err != nil {
 		return err
 	}

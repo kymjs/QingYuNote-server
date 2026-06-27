@@ -112,6 +112,18 @@ type adminDeviceUsageWire struct {
 	LastTime   string `json:"last_time"`
 }
 
+type adminWebDAVCloudWire struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+	BaseURL  string `json:"base_url"`
+	NotesDir string `json:"notes_dir"`
+}
+
+type adminCloudServiceWire struct {
+	Type   string                `json:"type"` // qingyu | webdav | none
+	WebDAV *adminWebDAVCloudWire `json:"webdav,omitempty"`
+}
+
 type adminUserWire struct {
 	ID                int64                     `json:"id"`
 	RegisterSource    string                    `json:"register_source"`
@@ -121,6 +133,7 @@ type adminUserWire struct {
 	QingyuActive      bool                      `json:"qingyu_active"`
 	QingyuExpiresAt   string                    `json:"qingyu_expires_at,omitempty"`
 	QingyuIsLifetime  bool                      `json:"qingyu_is_lifetime"`
+	CloudService      adminCloudServiceWire     `json:"cloud_service"`
 	TotalRechargeYuan float64                   `json:"total_recharge_yuan"`
 	RechargeRecords   []adminRechargeRecordWire `json:"recharge_records"`
 	DeviceUsage       []adminDeviceUsageWire    `json:"device_usage"`
@@ -182,6 +195,11 @@ func (s *Server) handleAdminListUsers(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
 		return
 	}
+	syncByUser, err := s.Store.ListUserSyncSettingsByUserIDs(ctx, userIDs)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
+		return
+	}
 	loc, err := time.LoadLocation("Asia/Shanghai")
 	if err != nil {
 		loc = time.UTC
@@ -226,6 +244,7 @@ func (s *Server) handleAdminListUsers(w http.ResponseWriter, r *http.Request) {
 			QingyuActive:      qingyuOK,
 			QingyuExpiresAt:   expYmd,
 			QingyuIsLifetime:  life,
+			CloudService:      adminCloudServiceFromRow(qingyuOK, syncByUser[row.ID]),
 			TotalRechargeYuan: float64(row.TotalRechargeFen) / 100.0,
 			RechargeRecords:   wireRecs,
 			DeviceUsage:       wireDevs,
@@ -244,6 +263,50 @@ func (s *Server) handleAdminListUsers(w http.ResponseWriter, r *http.Request) {
 		"page":         normalizeAdminUsersPage(page),
 		"page_size":    store.AdminUsersPageSize,
 	})
+}
+
+func adminCloudServiceFromRow(qingyuSubscriptionOK bool, sync store.UserSyncSettingsRow) adminCloudServiceWire {
+	if !sync.Enabled {
+		return adminCloudServiceWire{Type: "none"}
+	}
+	switch strings.TrimSpace(sync.SyncProvider) {
+	case "qingyu_cloud":
+		if qingyuSubscriptionOK {
+			return adminCloudServiceWire{Type: "qingyu"}
+		}
+		return adminCloudServiceWire{Type: "none"}
+	case "webdav":
+		baseURL := ""
+		if sync.BaseURL.Valid {
+			baseURL = strings.TrimSpace(sync.BaseURL.String)
+		}
+		if baseURL == "" {
+			return adminCloudServiceWire{Type: "none"}
+		}
+		username := ""
+		if sync.Username.Valid {
+			username = sync.Username.String
+		}
+		password := ""
+		if sync.Password.Valid {
+			password = sync.Password.String
+		}
+		notesDir := ""
+		if sync.NotesDir.Valid {
+			notesDir = sync.NotesDir.String
+		}
+		return adminCloudServiceWire{
+			Type: "webdav",
+			WebDAV: &adminWebDAVCloudWire{
+				Username: username,
+				Password: password,
+				BaseURL:  baseURL,
+				NotesDir: notesDir,
+			},
+		}
+	default:
+		return adminCloudServiceWire{Type: "none"}
+	}
 }
 
 func normalizeAdminUsersPage(page int) int {
