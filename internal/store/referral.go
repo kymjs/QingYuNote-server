@@ -55,7 +55,7 @@ type InvitePopupStatsRow struct {
 }
 
 func (s *Store) GrantWelcomeBonusPending(ctx context.Context, userID int64, now time.Time) error {
-	q := `UPDATE users SET welcome_bonus_granted_at = ?, invite_popup_pending = 1, updated_at = ?
+	q := `UPDATE users SET welcome_bonus_granted_at = ?, updated_at = ?
 		WHERE id = ? AND welcome_bonus_granted_at IS NULL`
 	res, err := s.DB.ExecContext(ctx, q, now, now, userID)
 	if err != nil {
@@ -68,22 +68,26 @@ func (s *Store) GrantWelcomeBonusPending(ctx context.Context, userID int64, now 
 	return nil
 }
 
-func (s *Store) ClearInvitePopupPending(ctx context.Context, userID int64) error {
-	now := time.Now().UTC()
-	_, err := s.DB.ExecContext(ctx,
-		`UPDATE users SET invite_popup_pending = 0, updated_at = ? WHERE id = ?`,
-		now, userID)
-	return err
-}
-
-func (s *Store) GetInvitePopupPending(ctx context.Context, userID int64) (bool, error) {
-	var pending int
+// UserHasInvitePopupImpression 用户是否已有邀请弹窗曝光记录（服务端唯一「已展示」依据）。
+func (s *Store) UserHasInvitePopupImpression(ctx context.Context, userID int64) (bool, error) {
+	var id int64
 	err := s.DB.QueryRowContext(ctx,
-		`SELECT COALESCE(invite_popup_pending, 0) FROM users WHERE id = ?`, userID).Scan(&pending)
+		`SELECT id FROM invite_popup_events
+		 WHERE user_id = ? AND event_type = 'impression' LIMIT 1`,
+		userID).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
-	return pending != 0, err
+	return err == nil, err
+}
+
+// ShouldShowInvitePopup 是否应向该用户展示邀请弹窗：历史上从未曝光过即为 true。
+func (s *Store) ShouldShowInvitePopup(ctx context.Context, userID int64) (bool, error) {
+	has, err := s.UserHasInvitePopupImpression(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+	return !has, nil
 }
 
 func (s *Store) GetReferralClaimByToken(ctx context.Context, token string) (*ReferralClaimRow, error) {

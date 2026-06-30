@@ -195,7 +195,6 @@ func (s *Server) handleReferralPopupImpression(w http.ResponseWriter, r *http.Re
 	ctx := r.Context()
 	now := time.Now().UTC()
 	_ = s.Store.InsertInvitePopupEvent(ctx, req.Variant, "impression", uid, now)
-	_ = s.Store.ClearInvitePopupPending(ctx, uid)
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
