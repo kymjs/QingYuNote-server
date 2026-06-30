@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -102,8 +103,9 @@ func (s *Server) adminAuth(next func(http.ResponseWriter, *http.Request)) http.H
 
 type adminRechargeRecordWire struct {
 	Time       string  `json:"time"`
-	Channel    string  `json:"channel"`
-	AmountYuan float64 `json:"amount_yuan"`
+	Channel    string  `json:"channel,omitempty"`
+	AmountYuan float64 `json:"amount_yuan,omitempty"`
+	GrantLabel string  `json:"grant_label,omitempty"`
 }
 
 type adminDeviceUsageWire struct {
@@ -137,6 +139,7 @@ type adminUserWire struct {
 	TotalRechargeYuan float64                   `json:"total_recharge_yuan"`
 	RechargeRecords   []adminRechargeRecordWire `json:"recharge_records"`
 	DeviceUsage       []adminDeviceUsageWire    `json:"device_usage"`
+	InviteCount       int64                     `json:"invite_count"`
 }
 
 // 同一事务内创建用户与首条 OAuth identity 时 created_at 应几乎相同；手机号注册后再绑定第三方则 identity 更晚，仍视为验证码注册。
@@ -160,6 +163,45 @@ func adminRegisterSource(userCreated time.Time, prov sql.NullString, identAt sql
 	default:
 		return "sms"
 	}
+}
+
+func mergeAdminMembershipHistory(
+	recs []store.AdminRechargeRecordRow,
+	grants []store.AdminMembershipGrantRow,
+	loc *time.Location,
+) []adminRechargeRecordWire {
+	type item struct {
+		at   time.Time
+		wire adminRechargeRecordWire
+	}
+	items := make([]item, 0, len(recs)+len(grants))
+	for _, r := range recs {
+		items = append(items, item{
+			at: r.CreatedAt,
+			wire: adminRechargeRecordWire{
+				Time:       r.CreatedAt.In(loc).Format("2006-01-02 15:04:05"),
+				Channel:    r.Channel,
+				AmountYuan: float64(r.AmountFen) / 100.0,
+			},
+		})
+	}
+	for _, g := range grants {
+		items = append(items, item{
+			at: g.CreatedAt,
+			wire: adminRechargeRecordWire{
+				Time:       g.CreatedAt.In(loc).Format("2006-01-02 15:04:05"),
+				GrantLabel: store.FormatMembershipGrantLabel(g.Source, g.GrantDays, g.GrantMonths),
+			},
+		})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].at.After(items[j].at)
+	})
+	out := make([]adminRechargeRecordWire, len(items))
+	for i, it := range items {
+		out[i] = it.wire
+	}
+	return out
 }
 
 func (s *Server) handleAdminListUsers(w http.ResponseWriter, r *http.Request) {
@@ -190,12 +232,22 @@ func (s *Server) handleAdminListUsers(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
 		return
 	}
+	grantByUser, err := s.Store.ListAdminMembershipGrantRecords(ctx, userIDs)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
+		return
+	}
 	devByUser, err := s.Store.ListAdminUserDevices(ctx, userIDs)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
 		return
 	}
 	syncByUser, err := s.Store.ListUserSyncSettingsByUserIDs(ctx, userIDs)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
+		return
+	}
+	inviteByUser, err := s.Store.CountReferralsByInviters(ctx, userIDs)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
 		return
@@ -218,14 +270,8 @@ func (s *Server) handleAdminListUsers(w http.ResponseWriter, r *http.Request) {
 		state, expYmd, life := subscription.RowToAPIState(sub, now)
 		qingyuOK := state == "active" || state == "lifetime"
 		recs := recByUser[row.ID]
-		wireRecs := make([]adminRechargeRecordWire, 0, len(recs))
-		for _, r := range recs {
-			wireRecs = append(wireRecs, adminRechargeRecordWire{
-				Time:       r.CreatedAt.In(loc).Format("2006-01-02 15:04:05"),
-				Channel:    r.Channel,
-				AmountYuan: float64(r.AmountFen) / 100.0,
-			})
-		}
+		grants := grantByUser[row.ID]
+		wireRecs := mergeAdminMembershipHistory(recs, grants, loc)
 		devs := devByUser[row.ID]
 		wireDevs := make([]adminDeviceUsageWire, 0, len(devs))
 		for _, d := range devs {
@@ -248,6 +294,7 @@ func (s *Server) handleAdminListUsers(w http.ResponseWriter, r *http.Request) {
 			TotalRechargeYuan: float64(row.TotalRechargeFen) / 100.0,
 			RechargeRecords:   wireRecs,
 			DeviceUsage:       wireDevs,
+			InviteCount:       inviteByUser[row.ID],
 		}
 		out = append(out, wire)
 	}

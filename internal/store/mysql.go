@@ -54,7 +54,8 @@ type User struct {
 }
 
 func (s *Store) UpsertUserByWechat(ctx context.Context, openID string) (*User, error) {
-	return s.EnsureUserForIdentity(ctx, ProviderWechat, openID)
+	u, _, err := s.EnsureUserForIdentity(ctx, ProviderWechat, openID)
+	return u, err
 }
 
 func (s *Store) GetUserByWechatOpenID(ctx context.Context, openID string) (*User, error) {

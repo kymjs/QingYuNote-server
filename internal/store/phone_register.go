@@ -53,6 +53,7 @@ func (s *Store) CreateUserWithPhonePassword(ctx context.Context, rawPhone, passw
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
+	_ = s.RecordPhoneRegistrationHistory(ctx, digits, now)
 	return s.GetUserByID(ctx, id)
 }
 

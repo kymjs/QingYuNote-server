@@ -19,6 +19,9 @@ const (
 // ErrIdentityLinkedOtherUser 该第三方账号已绑定到其他用户。
 var ErrIdentityLinkedOtherUser = errors.New("identity_linked_to_other_user")
 
+// ErrIdentityHistoricallyRegistered 该第三方账号历史上曾注册过（含已注销）。
+var ErrIdentityHistoricallyRegistered = errors.New("identity_historically_registered")
+
 // LookupUserIDByIdentity 查询 provider+subject 是否已绑定用户（不存在则 sql.ErrNoRows）。
 func (s *Store) LookupUserIDByIdentity(ctx context.Context, provider, subject string) (int64, error) {
 	p := normalizeProv(provider)
@@ -42,28 +45,36 @@ func (s *Store) findUserIDByIdentity(ctx context.Context, tx *sql.Tx, provider, 
 }
 
 // EnsureUserForIdentity 若该 provider+subject 已存在则返回对应用户；否则创建 users + identity。
-func (s *Store) EnsureUserForIdentity(ctx context.Context, provider, subject string) (*User, error) {
+// 第二个返回值表示是否本次新创建用户。
+func (s *Store) EnsureUserForIdentity(ctx context.Context, provider, subject string) (*User, bool, error) {
 	provider = normalizeProv(provider)
 	subject = strings.TrimSpace(subject)
 	if provider == "" || subject == "" {
-		return nil, errors.New("invalid_identity")
+		return nil, false, errors.New("invalid_identity")
 	}
 
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	uid, err := s.findUserIDByIdentity(ctx, tx, provider, subject)
 	if err == nil {
 		if err := tx.Commit(); err != nil {
-			return nil, err
+			return nil, false, err
 		}
-		return s.GetUserByID(ctx, uid)
+		u, err := s.GetUserByID(ctx, uid)
+		return u, false, err
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
-		return nil, err
+		return nil, false, err
+	}
+
+	if ever, err := s.IdentityEverRegistered(ctx, provider, subject); err != nil {
+		return nil, false, err
+	} else if ever {
+		return nil, false, ErrIdentityHistoricallyRegistered
 	}
 
 	now := time.Now().UTC()
@@ -71,30 +82,32 @@ func (s *Store) EnsureUserForIdentity(ctx context.Context, provider, subject str
 		`INSERT INTO users (folder_key, wechat_openid, created_at, updated_at) VALUES ('__pending__', NULL, ?, ?)`,
 		now, now)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	id, err := res.LastInsertId()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	folderKey := fmt.Sprintf("u%d", id)
 	if _, err := tx.ExecContext(ctx, `UPDATE users SET folder_key = ? WHERE id = ?`, folderKey, id); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO user_identities (user_id, provider, subject, created_at) VALUES (?, ?, ?, ?)`,
 		id, provider, subject, now); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if provider == ProviderWechat {
 		if _, err := tx.ExecContext(ctx, `UPDATE users SET wechat_openid = ?, updated_at = ? WHERE id = ?`, subject, now, id); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return s.GetUserByID(ctx, id)
+	_ = s.RecordIdentityRegistrationHistory(ctx, provider, subject, now)
+	u, err := s.GetUserByID(ctx, id)
+	return u, true, err
 }
 
 // LinkIdentity 将 provider+subject 绑定到当前 user_id（登录后调用）。若已被他人占用则返回 ErrIdentityLinkedOtherUser。

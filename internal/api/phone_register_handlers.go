@@ -11,6 +11,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/kymjs/noteapi/internal/aliyunsms"
+	"github.com/kymjs/noteapi/internal/referral"
 	"github.com/kymjs/noteapi/internal/store"
 )
 
@@ -91,9 +92,11 @@ func (s *Server) handleSendRegisterSms(w http.ResponseWriter, r *http.Request) {
 }
 
 type registerConfirmReq struct {
-	Phone         string `json:"phone"`
-	Password      string `json:"password"`
-	SmsVerifyCode string `json:"sms_verify_code"`
+	Phone              string `json:"phone"`
+	Password           string `json:"password"`
+	SmsVerifyCode      string `json:"sms_verify_code"`
+	ReferralClaimToken string `json:"referral_claim_token"`
+	InviterPhone       string `json:"inviter_phone"`
 }
 
 // handleRegisterConfirm POST /api/v1/register
@@ -135,6 +138,13 @@ func (s *Server) handleRegisterConfirm(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
 		return
 	}
+	if ever, err := s.Store.PhoneEverRegistered(ctx, digits); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
+		return
+	} else if ever {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "already_registered"})
+		return
+	}
 
 	cli, err := aliyunsms.NewClient(s.Cfg.AliyunSMSRegion, s.Cfg.AliyunAccessKeyID, s.Cfg.AliyunAccessKeySecret)
 	if err != nil {
@@ -168,5 +178,6 @@ func (s *Server) handleRegisterConfirm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	platform, deviceID, appVersion := extractDeviceInfo(r)
+	referral.OnNewUserRegistered(ctx, s.Store, u.ID, req.ReferralClaimToken, digits)
 	s.issueAuthToken(w, u.ID, platform, deviceID, appVersion)
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/kymjs/noteapi/internal/config"
 	"github.com/kymjs/noteapi/internal/huawei"
 	"github.com/kymjs/noteapi/internal/huaweiiap"
+	"github.com/kymjs/noteapi/internal/referral"
 	"github.com/kymjs/noteapi/internal/smsquota"
 	"github.com/kymjs/noteapi/internal/store"
 	"github.com/kymjs/noteapi/internal/subscription"
@@ -57,6 +58,10 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/register/captcha/new", s.handleRegisterCaptchaNew)
 	mux.HandleFunc("POST /api/v1/register/sms/send", s.handleSendRegisterSms)
 	mux.HandleFunc("POST /api/v1/register", s.handleRegisterConfirm)
+	mux.HandleFunc("POST /api/v1/referral/claim", s.handleReferralClaim)
+	mux.HandleFunc("GET /api/v1/referral/history", s.handleReferralHistory)
+	mux.HandleFunc("POST /api/v1/me/referral/popup/impression", s.auth(s.handleReferralPopupImpression))
+	mux.HandleFunc("POST /api/v1/me/referral/popup/click", s.auth(s.handleReferralPopupClick))
 	mux.HandleFunc("POST /api/v1/me/link/wechat", s.auth(s.handleLinkWechat))
 	mux.HandleFunc("POST /api/v1/me/link/huawei", s.auth(s.handleLinkHuawei))
 	mux.HandleFunc("POST /api/v1/me/link/apple", s.auth(s.handleLinkApple))
@@ -86,6 +91,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/webhooks/alipay/notify", s.handleAlipayNotify)
 	mux.HandleFunc("POST /api/v1/admin/auth/login", s.handleAdminLogin)
 	mux.HandleFunc("GET /api/v1/admin/users", s.adminAuth(s.handleAdminListUsers))
+	mux.HandleFunc("GET /api/v1/admin/users/referrals", s.adminAuth(s.handleAdminUserReferrals))
+	mux.HandleFunc("GET /api/v1/admin/referral/popup-stats", s.adminAuth(s.handleAdminInvitePopupStats))
 	mux.HandleFunc("POST /api/v1/admin/redemption-codes", s.adminAuth(s.handleAdminCreateRedemptionCodes))
 	mux.HandleFunc("POST /api/v1/admin/users/create", s.adminAuth(s.handleAdminCreateUser))
 	mux.HandleFunc("POST /api/v1/admin/users/phone", s.adminAuth(s.handleAdminSetUserPhone))
@@ -140,7 +147,9 @@ func readJSON[T any](r *http.Request, dst *T) error {
 }
 
 type authWechatReq struct {
-	Code string `json:"code"`
+	Code               string `json:"code"`
+	ReferralClaimToken string `json:"referral_claim_token"`
+	InviterPhone       string `json:"inviter_phone"`
 }
 
 type authLoginResp struct {
@@ -202,18 +211,27 @@ func (s *Server) handleAuthWechat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	u, err := s.Store.EnsureUserForIdentity(ctx, store.ProviderWechat, o.OpenID)
+	u, isNew, err := s.Store.EnsureUserForIdentity(ctx, store.ProviderWechat, o.OpenID)
 	if err != nil {
+		if errors.Is(err, store.ErrIdentityHistoricallyRegistered) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "account_historically_registered"})
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
 		return
+	}
+	if isNew {
+		referral.OnNewUserRegistered(ctx, s.Store, u.ID, req.ReferralClaimToken, "")
 	}
 	platform, deviceID, appVersion := extractDeviceInfo(r)
 	s.issueAuthToken(w, u.ID, platform, deviceID, appVersion)
 }
 
 type authHuaweiReq struct {
-	AuthorizationCode string `json:"authorization_code"`
-	RedirectURI       string `json:"redirect_uri,omitempty"`
+	AuthorizationCode  string `json:"authorization_code"`
+	RedirectURI        string `json:"redirect_uri,omitempty"`
+	ReferralClaimToken string `json:"referral_claim_token"`
+	InviterPhone       string `json:"inviter_phone"`
 }
 
 func (s *Server) handleAuthHuawei(w http.ResponseWriter, r *http.Request) {
@@ -236,17 +254,26 @@ func (s *Server) handleAuthHuawei(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	u, err := s.Store.EnsureUserForIdentity(ctx, store.ProviderHuawei, sub)
+	u, isNew, err := s.Store.EnsureUserForIdentity(ctx, store.ProviderHuawei, sub)
 	if err != nil {
+		if errors.Is(err, store.ErrIdentityHistoricallyRegistered) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "account_historically_registered"})
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
 		return
+	}
+	if isNew {
+		referral.OnNewUserRegistered(ctx, s.Store, u.ID, req.ReferralClaimToken, "")
 	}
 	platform, deviceID, appVersion := extractDeviceInfo(r)
 	s.issueAuthToken(w, u.ID, platform, deviceID, appVersion)
 }
 
 type authAppleReq struct {
-	IdentityToken string `json:"identity_token"`
+	IdentityToken      string `json:"identity_token"`
+	ReferralClaimToken string `json:"referral_claim_token"`
+	InviterPhone       string `json:"inviter_phone"`
 }
 
 func (s *Server) handleAuthApple(w http.ResponseWriter, r *http.Request) {
@@ -265,10 +292,17 @@ func (s *Server) handleAuthApple(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	u, err := s.Store.EnsureUserForIdentity(ctx, store.ProviderApple, sub)
+	u, isNew, err := s.Store.EnsureUserForIdentity(ctx, store.ProviderApple, sub)
 	if err != nil {
+		if errors.Is(err, store.ErrIdentityHistoricallyRegistered) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "account_historically_registered"})
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
 		return
+	}
+	if isNew {
+		referral.OnNewUserRegistered(ctx, s.Store, u.ID, req.ReferralClaimToken, "")
 	}
 	platform, deviceID, appVersion := extractDeviceInfo(r)
 	s.issueAuthToken(w, u.ID, platform, deviceID, appVersion)
@@ -660,6 +694,9 @@ func (s *Server) extendQingyuSubscriptionAfterPayment(ctx context.Context, userI
 		if err := s.Store.InsertMembershipRechargeRecord(ctx, audit); err != nil {
 			log.Printf("membership recharge audit: %v", err)
 		}
+	}
+	if audit != nil && audit.OrderID.Valid {
+		referral.OnInviteeRechargePaid(ctx, s.Store, userID, audit.OrderID.Int64, planID)
 	}
 }
 

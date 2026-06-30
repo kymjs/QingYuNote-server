@@ -325,6 +325,9 @@ func (s *Store) ResetUserPassword(ctx context.Context, userID int64, hash string
 }
 
 func (s *Store) DeleteUser(ctx context.Context, userID int64) error {
+	if err := s.ArchiveUserRegistrationHistory(ctx, userID); err != nil {
+		return err
+	}
 	tx, err := s.DB.Begin()
 	if err != nil {
 		return err

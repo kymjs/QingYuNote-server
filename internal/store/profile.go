@@ -67,6 +67,9 @@ func (s *Store) SetUserPasswordHash(ctx context.Context, userID int64, hash *str
 
 // DeleteUserByID 删除用户行（外键级联 identities / subscriptions / orders）。
 func (s *Store) DeleteUserByID(ctx context.Context, userID int64) error {
+	if err := s.ArchiveUserRegistrationHistory(ctx, userID); err != nil {
+		return err
+	}
 	_, err := s.DB.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, userID)
 	return err
 }

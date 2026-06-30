@@ -73,6 +73,43 @@ func NullableDate(t time.Time) sql.NullTime {
 	return sql.NullTime{Time: t, Valid: true}
 }
 
+// ExtendByDays 按自然日顺延会籍；未过期则从到期日起算，已过期或从未开通则从今日起算。
+func ExtendByDays(sub *store.SubscriptionRow, days int, nowUTC time.Time) (newExpiry time.Time, lifetime bool) {
+	if days <= 0 {
+		return time.Time{}, false
+	}
+	today := dateUTC(nowUTC)
+	if sub != nil && sub.IsLifetime {
+		return time.Date(lifetimeYear, 12, 31, 0, 0, 0, 0, time.UTC), true
+	}
+	var anchor time.Time
+	if sub != nil && sub.ExpiresAt.Valid {
+		expDay := dateUTC(sub.ExpiresAt.Time)
+		if !expDay.Before(today) {
+			anchor = expDay
+		} else {
+			anchor = today
+		}
+	} else {
+		anchor = today
+	}
+	return anchor.AddDate(0, 0, days), false
+}
+
+// ReferralInviterRewardDays 被邀请人充值成功后，邀请人获得的会员天数（约为套餐时长的一半）。
+func ReferralInviterRewardDays(plan string) int {
+	switch strings.TrimSpace(plan) {
+	case "monthly":
+		return 15
+	case "half_year":
+		return 105
+	case "yearly":
+		return 183
+	default:
+		return 0
+	}
+}
+
 // ApplyRedemptionPlan 与订单套餐 ID 对齐；lifetime_vip 单独设为终身。
 func ApplyRedemptionPlan(sub *store.SubscriptionRow, plan string, nowUTC time.Time) (newExpiry time.Time, lifetime bool) {
 	switch strings.TrimSpace(plan) {
