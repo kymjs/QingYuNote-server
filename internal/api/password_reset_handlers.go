@@ -33,6 +33,9 @@ type passwordResetConfirmReq struct {
 }
 
 func validChinaMobileDigits(d string) bool {
+	if aliyunsms.IsTestPhone(d) {
+		return true
+	}
 	if len(d) != 11 || d[0] != '1' {
 		return false
 	}

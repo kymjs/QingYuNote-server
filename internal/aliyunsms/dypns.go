@@ -26,7 +26,11 @@ func NewClient(region, ak, sk string) (*dypnsapi.Client, error) {
 }
 
 // SendVerifyCode 调用 SendSmsVerifyCode，下发短信验证码（服务端生成验证码并可由 Check 核验）。
+// 100 开头测试号跳过阿里云下发，客户端仍收到成功响应，核验时使用 TestSMSVerifyCode。
 func SendVerifyCode(cli *dypnsapi.Client, p SMSParams, phoneDigits string) error {
+	if IsTestPhone(phoneDigits) {
+		return nil
+	}
 	req := dypnsapi.CreateSendSmsVerifyCodeRequest()
 	req.PhoneNumber = strings.TrimSpace(phoneDigits)
 	req.SignName = strings.TrimSpace(p.SignName)
@@ -61,7 +65,11 @@ func SendVerifyCode(cli *dypnsapi.Client, p SMSParams, phoneDigits string) error
 }
 
 // CheckVerifyCode 调用 CheckSmsVerifyCode；返回是否核验通过（VerifyResult==PASS）。
+// 100 开头测试号在本地比对 TestSMSVerifyCode，不调用阿里云。
 func CheckVerifyCode(cli *dypnsapi.Client, p SMSParams, phoneDigits, verifyCode string) (bool, error) {
+	if IsTestPhone(phoneDigits) {
+		return strings.TrimSpace(verifyCode) == TestSMSVerifyCode, nil
+	}
 	req := dypnsapi.CreateCheckSmsVerifyCodeRequest()
 	req.PhoneNumber = strings.TrimSpace(phoneDigits)
 	req.VerifyCode = strings.TrimSpace(verifyCode)
