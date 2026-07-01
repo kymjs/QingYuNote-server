@@ -11,6 +11,15 @@ import (
 
 const ReferralClaimValidWindow = 24 * time.Hour
 
+func shanghaiDayStartUTC(now time.Time) time.Time {
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		loc = time.UTC
+	}
+	y, m, d := now.In(loc).Date()
+	return time.Date(y, m, d, 0, 0, 0, 0, loc).UTC()
+}
+
 const (
 	WelcomeBonusDays    = 7
 	ReferralInviterDays = 7
@@ -81,9 +90,31 @@ func (s *Store) UserHasInvitePopupImpression(ctx context.Context, userID int64) 
 	return err == nil, err
 }
 
-// ShouldShowInvitePopup 是否应向该用户展示邀请弹窗：历史上从未曝光过即为 true。
-func (s *Store) ShouldShowInvitePopup(ctx context.Context, userID int64) (bool, error) {
-	has, err := s.UserHasInvitePopupImpression(ctx, userID)
+// UserHasInvitePopupImpressionSince 用户在 since 之后是否已有邀请弹窗曝光记录。
+func (s *Store) UserHasInvitePopupImpressionSince(ctx context.Context, userID int64, since time.Time) (bool, error) {
+	var id int64
+	err := s.DB.QueryRowContext(ctx,
+		`SELECT id FROM invite_popup_events
+		 WHERE user_id = ? AND event_type = 'impression' AND created_at >= ? LIMIT 1`,
+		userID, since).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// ShouldShowInvitePopup 是否应向该用户展示邀请弹窗：
+// 轻羽云会员 — 历史上从未曝光过；非会员 — 当日（上海时区）未曝光过。
+func (s *Store) ShouldShowInvitePopup(ctx context.Context, userID int64, isQingyuMember bool) (bool, error) {
+	if isQingyuMember {
+		has, err := s.UserHasInvitePopupImpression(ctx, userID)
+		if err != nil {
+			return false, err
+		}
+		return !has, nil
+	}
+	todayStart := shanghaiDayStartUTC(time.Now().UTC())
+	has, err := s.UserHasInvitePopupImpressionSince(ctx, userID, todayStart)
 	if err != nil {
 		return false, err
 	}

@@ -81,15 +81,6 @@ func (s *Server) handleReferralClaim(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
 		return
 	}
-	member, err := s.Store.UserHasActiveQingyuMembership(ctx, req.InviterUID)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
-		return
-	}
-	if !member {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "inviter_not_member"})
-		return
-	}
 	now := time.Now().UTC()
 	todayStart := shanghaiDayStartUTC(now)
 	cnt, err := s.Store.CountReferralClaimsByInviterSince(ctx, req.InviterUID, todayStart)

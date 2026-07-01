@@ -32,7 +32,7 @@ type profileWire struct {
 	Email                 *string `json:"email"`
 	PasswordSet           bool    `json:"password_set"`
 	QingyuSubscriptionOK  bool    `json:"qingyu_subscription_active"`
-	InvitePopupPending    bool    `json:"invite_popup_pending"` // 历史上从未曝光邀请弹窗时为 true
+	InvitePopupPending    bool    `json:"invite_popup_pending"` // 会员：历史上未曝光；非会员：当日未曝光
 }
 
 func strPtrOrNil(ns sql.NullString) *string {
@@ -73,7 +73,7 @@ func (s *Server) handleGetProfile(w http.ResponseWriter, r *http.Request, uid in
 	}
 	state, expYmd, life := subscription.RowToAPIState(sub, time.Now().UTC())
 	qingyuOK := state == "active" || state == "lifetime"
-	popupPending, err := s.Store.ShouldShowInvitePopup(ctx, uid)
+	popupPending, err := s.Store.ShouldShowInvitePopup(ctx, uid, qingyuOK)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
 		return
