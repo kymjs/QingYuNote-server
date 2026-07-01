@@ -249,6 +249,31 @@ func (s *Store) MarkReferralClaimFailed(ctx context.Context, claimID int64) erro
 	return err
 }
 
+// GetPendingReferralClaimByInviteePhone 按被邀请人手机号查找有效待处理邀请（24h 内、未使用）。
+func (s *Store) GetPendingReferralClaimByInviteePhone(ctx context.Context, inviteePhone string, now time.Time) (*ReferralClaimRow, error) {
+	digits := NormalizeLoginPhoneDigits(inviteePhone)
+	if digits == "" {
+		return nil, sql.ErrNoRows
+	}
+	since := now.Add(-ReferralClaimValidWindow)
+	var r ReferralClaimRow
+	q := `SELECT id, token, inviter_user_id, claimed_at, used_by_user_id, used_at, invitee_phone, status
+		FROM referral_claims
+		WHERE invitee_phone = ? AND status = ? AND used_at IS NULL AND claimed_at >= ?
+		ORDER BY claimed_at DESC LIMIT 1`
+	var inviteePhoneCol sql.NullString
+	var status string
+	err := s.DB.QueryRowContext(ctx, q, digits, ReferralClaimStatusPending, since).Scan(
+		&r.ID, &r.Token, &r.InviterUserID, &r.ClaimedAt, &r.UsedByUserID, &r.UsedAt, &inviteePhoneCol, &status,
+	)
+	if err != nil {
+		return nil, err
+	}
+	r.InviteePhone = inviteePhoneCol
+	r.Status = status
+	return &r, nil
+}
+
 // GetReferralClaimByTokenForInvitee 按 token 读取邀请记录（含手机号）。
 func (s *Store) GetReferralClaimByTokenForInvitee(ctx context.Context, token string) (*ReferralClaimRow, error) {
 	token = strings.TrimSpace(token)

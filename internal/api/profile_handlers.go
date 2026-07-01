@@ -12,6 +12,7 @@ import (
 
 	"github.com/kymjs/noteapi/internal/aliyunsms"
 	"github.com/kymjs/noteapi/internal/qingyuwebdav"
+	"github.com/kymjs/noteapi/internal/referral"
 	"github.com/kymjs/noteapi/internal/store"
 	"github.com/kymjs/noteapi/internal/subscription"
 )
@@ -141,6 +142,7 @@ func (s *Server) handlePatchProfile(w http.ResponseWriter, r *http.Request, uid 
 	}
 
 	passwordSet := u.PasswordHash.Valid && strings.TrimSpace(u.PasswordHash.String) != ""
+	hadPhone := u.Phone.Valid && strings.TrimSpace(u.Phone.String) != ""
 
 	newPw := ""
 	if req.NewPassword != nil {
@@ -278,6 +280,9 @@ func (s *Server) handlePatchProfile(w http.ResponseWriter, r *http.Request, uid 
 	if err := s.Store.PatchUserProfile(ctx, uid, req.Username, req.AvatarURL, phoneForPatch, req.Email); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
 		return
+	}
+	if phoneForPatch != nil && !hadPhone {
+		referral.OnPhoneBound(ctx, s.Store, uid, *phoneForPatch)
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

@@ -29,12 +29,36 @@ func OnNewUserRegistered(ctx context.Context, st *store.Store, userID int64, cla
 	if err := st.GrantWelcomeBonusPending(ctx, userID, now); err != nil {
 		log.Printf("referral welcome pending user=%d: %v", userID, err)
 	}
-	token := strings.TrimSpace(claimToken)
-	if token == "" {
+	tryBindReferralForUser(ctx, st, userID, claimToken, inviteePhone, now)
+}
+
+// OnPhoneBound 用户首次绑定手机号：尝试按手机号匹配官网提交的待处理邀请（三方登录后绑手机场景）。
+func OnPhoneBound(ctx context.Context, st *store.Store, userID int64, phone string) {
+	now := time.Now().UTC()
+	if _, err := st.GetInviterUserIDForInvitee(ctx, userID); err == nil {
+		return
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		log.Printf("referral phone bound lookup user=%d: %v", userID, err)
 		return
 	}
-	if err := tryBindReferralClaim(ctx, st, userID, token, inviteePhone, now); err != nil {
-		log.Printf("referral claim user=%d token=%s: %v", userID, token, err)
+	tryBindReferralForUser(ctx, st, userID, "", phone, now)
+}
+
+func tryBindReferralForUser(ctx context.Context, st *store.Store, inviteeUserID int64, claimToken, inviteePhone string, now time.Time) {
+	token := strings.TrimSpace(claimToken)
+	phone := store.NormalizeLoginPhoneDigits(inviteePhone)
+	if token != "" {
+		if err := tryBindReferralClaim(ctx, st, inviteeUserID, token, inviteePhone, now); err == nil {
+			return
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			log.Printf("referral claim user=%d token=%s: %v", inviteeUserID, token, err)
+		}
+	}
+	if phone == "" {
+		return
+	}
+	if err := tryBindReferralClaimByPhone(ctx, st, inviteeUserID, phone, now); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		log.Printf("referral claim user=%d phone=%s: %v", inviteeUserID, phone, err)
 	}
 }
 
@@ -44,6 +68,14 @@ func tryBindReferralClaim(ctx context.Context, st *store.Store, inviteeUserID in
 		return err
 	}
 	return bindReferralClaim(ctx, st, inviteeUserID, claim, inviteePhone, now)
+}
+
+func tryBindReferralClaimByPhone(ctx context.Context, st *store.Store, inviteeUserID int64, phone string, now time.Time) error {
+	claim, err := st.GetPendingReferralClaimByInviteePhone(ctx, phone, now)
+	if err != nil {
+		return err
+	}
+	return bindReferralClaim(ctx, st, inviteeUserID, claim, phone, now)
 }
 
 func bindReferralClaim(ctx context.Context, st *store.Store, inviteeUserID int64, claim *store.ReferralClaimRow, inviteePhone string, now time.Time) error {
