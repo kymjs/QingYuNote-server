@@ -21,6 +21,7 @@ import (
 	"github.com/kymjs/noteapi/internal/huawei"
 	"github.com/kymjs/noteapi/internal/huaweiiap"
 	"github.com/kymjs/noteapi/internal/referral"
+	"github.com/kymjs/noteapi/internal/release"
 	"github.com/kymjs/noteapi/internal/smsquota"
 	"github.com/kymjs/noteapi/internal/store"
 	"github.com/kymjs/noteapi/internal/subscription"
@@ -32,16 +33,18 @@ type Server struct {
 	Cfg         *config.Config
 	Store       *store.Store
 	qingyuGuard *qingyuWebDAVGuard
+	releaseManifests *release.Provider
 	// smsQuota 公开短信（注册 / 重置密码）发送频控：每 IP、每手机号、每设备 ID 滑动 24h 各最多 3 次；见 sms_public_quota.go 与 TECHNICAL.md §2.11。
 	smsQuota *smsquota.Window
 }
 
 func NewServer(cfg *config.Config, st *store.Store) (*Server, error) {
 	s := &Server{
-		Cfg:         cfg,
-		Store:       st,
-		qingyuGuard: newQingyuWebDAVGuard(),
-		smsQuota:    smsquota.New(smsPublicQuotaPerWindow, 24*time.Hour),
+		Cfg:              cfg,
+		Store:            st,
+		qingyuGuard:      newQingyuWebDAVGuard(),
+		releaseManifests: release.NewProvider(),
+		smsQuota:         smsquota.New(smsPublicQuotaPerWindow, 24*time.Hour),
 	}
 	return s, nil
 }
@@ -107,7 +110,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /apple-app-site-association", s.handleAppleAppSiteAssociation)
 	mux.HandleFunc("GET /wx/login/", s.handleWXUniversalLinkLanding)
 	mux.HandleFunc("GET /wx/login", s.handleWXLoginNoTrailingSlash)
-	return withCORS(mux)
+	return withCORS(withMinAppVersion(s.releaseManifests)(mux))
 }
 
 func (s *Server) auth(next func(http.ResponseWriter, *http.Request, int64)) http.HandlerFunc {
