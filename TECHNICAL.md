@@ -142,6 +142,7 @@
 | 方法 | 路径 | 鉴权 | 说明 |
 |------|------|------|------|
 | POST | `/api/v1/orders` | Bearer | body：`{ "plan_id": "monthly" \| "half_year" \| "yearly" }` |
+| POST | `/api/v1/me/h5-pay-ticket` | Bearer（普通 access token） | 签发短时 `scope=h5_pay` ticket，供外部浏览器 VIP 页调 page-pay |
 | POST | `/api/v1/orders/{id}/wechat/prepay` | Bearer | APP 调起参数；商户未配置 → 503 `wechat_pay_not_configured` |
 | POST | `/api/v1/orders/{id}/apple/verify` | Bearer | body：`{ "signed_transaction": "<JWS>" }`；校验 StoreKit 交易 JWS，通过后标记 `paid` 并顺延订阅；未配置 `APPLE_IAP_*` → 503 `apple_iap_not_configured` |
 | GET | `/api/v1/orders/{id}` | Bearer | 查询订单 |

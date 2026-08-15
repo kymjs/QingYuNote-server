@@ -73,6 +73,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/me/merge/apple", s.auth(s.handleMergeApple))
 	mux.HandleFunc("POST /api/v1/me/rebind/identity/confirm", s.auth(s.handleConfirmIdentityRebind))
 	mux.HandleFunc("GET /api/v1/me/subscription", s.auth(s.handleSubscription))
+	mux.HandleFunc("POST /api/v1/me/h5-pay-ticket", s.auth(s.handleCreateH5PayTicket))
 	mux.HandleFunc("GET /api/v1/me/profile", s.auth(s.handleGetProfile))
 	mux.HandleFunc("GET /api/v1/me/ai-tag-config", s.auth(s.handleGetAiTagConfig))
 	mux.HandleFunc("POST /api/v1/me/redeem", s.auth(s.handleRedeem))
@@ -121,19 +122,43 @@ func (s *Server) auth(next func(http.ResponseWriter, *http.Request, int64)) http
 			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 			return
 		}
-		uid, err := auth.ParseUserID(raw, s.Cfg.JWTSecret)
+		claims, err := auth.ParseTokenClaims(raw, s.Cfg.JWTSecret)
 		if err != nil {
 			http.Error(w, `{"error":"invalid_token"}`, http.StatusUnauthorized)
 			return
 		}
+		if claims.Scope == auth.ScopeH5Pay && !h5PayTicketAllows(r.Method, r.URL.Path) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "h5_pay_scope_denied"})
+			return
+		}
+		uid := claims.UserID
 		platform, deviceID, appVersion := extractDeviceInfo(r)
-		if platform != "" && deviceID != "" {
+		if platform != "" && deviceID != "" && claims.Scope != auth.ScopeH5Pay {
 			go func() {
 				ctx := context.Background()
 				_ = s.Store.UpsertUserDeviceSession(ctx, uid, platform, deviceID, appVersion)
 			}()
 		}
 		next(w, r, uid)
+	}
+}
+
+// h5PayTicketAllows is the path whitelist for scope=h5_pay tickets (external VIP browser checkout).
+func h5PayTicketAllows(method, path string) bool {
+	switch {
+	case method == http.MethodGet && path == "/api/v1/me/subscription":
+		return true
+	case method == http.MethodPost && path == "/api/v1/orders":
+		return true
+	case method == http.MethodGet && strings.HasPrefix(path, "/api/v1/orders/"):
+		// GET /api/v1/orders/{id} only (no nested segments beyond id).
+		rest := strings.TrimPrefix(path, "/api/v1/orders/")
+		return rest != "" && !strings.Contains(rest, "/")
+	case method == http.MethodPost && strings.HasPrefix(path, "/api/v1/orders/") && strings.HasSuffix(path, "/alipay/page-pay"):
+		mid := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/orders/"), "/alipay/page-pay")
+		return mid != "" && !strings.Contains(mid, "/")
+	default:
+		return false
 	}
 }
 

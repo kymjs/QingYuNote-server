@@ -142,7 +142,7 @@ func (s *Server) handleAlipayPagePaySign(w http.ResponseWriter, r *http.Request,
 	}
 	ret := strings.TrimSpace(s.Cfg.AlipayPagePayReturnURL)
 	if ret == "" {
-		ret = "https://note.kymjs.com/private/harmony.html"
+		ret = "https://note.kymjs.com/vip.html?paid=1"
 	}
 	param := alipay.TradePagePay{}
 	param.NotifyURL = s.alipayNotifyAbsURL()

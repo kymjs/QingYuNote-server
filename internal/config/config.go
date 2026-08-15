@@ -164,7 +164,7 @@ func Load() *Config {
 		AlipayPlatformCertPublicPath: getenv("ALIPAY_PLATFORM_CERT_PUBLIC_PATH", ""),
 		AlipayRootCertPath:           getenv("ALIPAY_ROOT_CERT_PATH", ""),
 		AlipayProduction:             parseAlipayProduction(),
-		AlipayPagePayReturnURL:       strings.TrimSpace(getenv("ALIPAY_PAGE_PAY_RETURN_URL", "https://note.kymjs.com/private/harmony.html")),
+		AlipayPagePayReturnURL:       strings.TrimSpace(getenv("ALIPAY_PAGE_PAY_RETURN_URL", "https://note.kymjs.com/vip.html?paid=1")),
 
 		AlipayPcAppID:                  getenv("ALIPAY_PC_APP_ID", ""),
 		AlipayPcAppPrivateKey:          getenv("ALIPAY_PC_APP_PRIVATE_KEY", ""),
