@@ -31,6 +31,8 @@ func alipaySubjectForPlan(planID string) string {
 		return "轻羽云服务会员（半年付）"
 	case "yearly":
 		return "轻羽云服务会员（年付）"
+	case "lifetime":
+		return "轻羽云服务会员（终身买断）"
 	default:
 		return "轻羽云服务会员"
 	}

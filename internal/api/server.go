@@ -660,7 +660,7 @@ func (s *Server) handleCreateOrder(w http.ResponseWriter, r *http.Request, uid i
 		return
 	}
 	plan := strings.TrimSpace(req.PlanID)
-	if config.ParsePlanMonths(plan) <= 0 || config.PlanAmountFen(plan) <= 0 {
+	if !config.ValidPlan(plan) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_plan"})
 		return
 	}

@@ -326,9 +326,17 @@ func ParsePlanMonths(plan string) int {
 		return 7
 	case "yearly":
 		return 12
+	case "lifetime":
+		// 终身买断不按月计；校验请用 ValidPlan / PlanAmountFen。
+		return 0
 	default:
 		return 0
 	}
+}
+
+// ValidPlan 是否为可下单的会员套餐（含终身买断）。
+func ValidPlan(plan string) bool {
+	return PlanAmountFen(plan) > 0
 }
 
 func PlanAmountFen(plan string) int {
@@ -339,9 +347,16 @@ func PlanAmountFen(plan string) int {
 		return 5000
 	case "yearly":
 		return 7300
+	case "lifetime":
+		return 19900
 	default:
 		return 0
 	}
+}
+
+// IsLifetimePlan 支付宝等网关的终身买断套餐（非兑换码 lifetime_vip）。
+func IsLifetimePlan(plan string) bool {
+	return strings.TrimSpace(plan) == "lifetime"
 }
 
 // AlipayCoreConfigured 为 true 时表示已配置证书模式所需全部文件/密钥（不校验文件是否可读）。

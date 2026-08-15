@@ -17,6 +17,10 @@ const lifetimeYear = LifetimeYearUTC
 
 // ExtendAfterPayment 与客户端「未过期则顺延、已过期则从今日起算」一致；按自然月递增。
 func ExtendAfterPayment(sub *store.SubscriptionRow, plan string, nowUTC time.Time) (newExpiry time.Time, lifetime bool) {
+	plan = strings.TrimSpace(plan)
+	if config.IsLifetimePlan(plan) || plan == "lifetime_vip" {
+		return time.Date(lifetimeYear, 12, 31, 0, 0, 0, 0, time.UTC), true
+	}
 	months := config.ParsePlanMonths(plan)
 	if months <= 0 {
 		return time.Time{}, false
@@ -105,6 +109,8 @@ func ReferralInviterRewardDays(plan string) int {
 		return 105
 	case "yearly":
 		return 183
+	case "lifetime", "lifetime_vip":
+		return 365
 	default:
 		return 0
 	}
