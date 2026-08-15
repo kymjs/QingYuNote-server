@@ -16,9 +16,12 @@ type aiTagConfigWire struct {
 	Reasoning    *aiTagReasoningWire   `json:"reasoning,omitempty"`
 }
 
-func (s *Server) handleGetAiTagConfig(w http.ResponseWriter, r *http.Request, _ int64) {
+func (s *Server) handleGetAiTagConfig(w http.ResponseWriter, r *http.Request, uid int64) {
 	if r.Method != http.MethodGet {
 		http.Error(w, `{"error":"method_not_allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.requireActiveMembership(w, r, uid) {
 		return
 	}
 	if !s.Cfg.MiniMaxConfigured() {

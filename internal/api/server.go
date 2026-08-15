@@ -63,6 +63,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/register", s.handleRegisterConfirm)
 	mux.HandleFunc("POST /api/v1/referral/claim", s.handleReferralClaim)
 	mux.HandleFunc("GET /api/v1/referral/history", s.handleReferralHistory)
+	mux.HandleFunc("POST /api/v1/vip-page/view", s.handleVipPageView)
 	mux.HandleFunc("POST /api/v1/me/referral/popup/impression", s.auth(s.handleReferralPopupImpression))
 	mux.HandleFunc("POST /api/v1/me/referral/popup/click", s.auth(s.handleReferralPopupClick))
 	mux.HandleFunc("POST /api/v1/me/link/wechat", s.auth(s.handleLinkWechat))
@@ -97,6 +98,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/admin/users", s.adminAuth(s.handleAdminListUsers))
 	mux.HandleFunc("GET /api/v1/admin/users/referrals", s.adminAuth(s.handleAdminUserReferrals))
 	mux.HandleFunc("GET /api/v1/admin/referral/popup-stats", s.adminAuth(s.handleAdminInvitePopupStats))
+	mux.HandleFunc("GET /api/v1/admin/vip-page/views", s.adminAuth(s.handleAdminVipPageViews))
 	mux.HandleFunc("POST /api/v1/admin/redemption-codes", s.adminAuth(s.handleAdminCreateRedemptionCodes))
 	mux.HandleFunc("POST /api/v1/admin/users/create", s.adminAuth(s.handleAdminCreateUser))
 	mux.HandleFunc("POST /api/v1/admin/users/phone", s.adminAuth(s.handleAdminSetUserPhone))
@@ -611,18 +613,7 @@ func (s *Server) handleQingyuWebDAV(w http.ResponseWriter, r *http.Request, uid 
 		return
 	}
 
-	ctx := r.Context()
-	sub, err := s.Store.GetSubscription(ctx, uid)
-	if err != nil {
-		if !errors.Is(err, sql.ErrNoRows) {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_failed"})
-			return
-		}
-		sub = nil
-	}
-	state, _, _ := subscription.RowToAPIState(sub, time.Now().UTC())
-	if state != "active" && state != "lifetime" {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "subscription_required"})
+	if !s.requireActiveMembership(w, r, uid) {
 		return
 	}
 	if !s.Cfg.QingyuWebDAVConfigured() {
