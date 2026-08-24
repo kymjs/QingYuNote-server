@@ -13,15 +13,60 @@ import (
 
 // PutStatusError WebDAV 返回非 2xx 时使用，便于 API 层映射为细分错误码。
 type PutStatusError struct {
-	StatusCode int
-	Body       string
+	StatusCode      int
+	TargetURL       string
+	ResponseHeaders string
+	Body            string
 }
 
 func (e *PutStatusError) Error() string {
 	if e == nil {
 		return ""
 	}
-	return fmt.Sprintf("put_status_%d: %s", e.StatusCode, e.Body)
+	details := make([]string, 0, 2)
+	if e.TargetURL != "" {
+		details = append(details, "target="+e.TargetURL)
+	}
+	if e.ResponseHeaders != "" {
+		details = append(details, "response_headers="+e.ResponseHeaders)
+	}
+	if e.Body != "" {
+		details = append(details, e.Body)
+	}
+	if len(details) == 0 {
+		return fmt.Sprintf("put_status_%d", e.StatusCode)
+	}
+	return fmt.Sprintf("put_status_%d: %s", e.StatusCode, strings.Join(details, "; "))
+}
+
+// diagnosticTargetURL 保留请求目标，移除 URL 用户信息与查询参数，避免日志泄露凭据或令牌。
+func diagnosticTargetURL(u *url.URL) string {
+	if u == nil {
+		return ""
+	}
+	safe := *u
+	safe.User = nil
+	safe.RawQuery = ""
+	safe.ForceQuery = false
+	return safe.String()
+}
+
+// diagnosticResponseHeaders 只保留 WebDAV 排障所需、不会承载会话信息的响应头。
+func diagnosticResponseHeaders(h http.Header) string {
+	const maxValueLength = 512
+	names := []string{"Server", "Allow", "DAV", "WWW-Authenticate", "Content-Type"}
+	parts := make([]string, 0, len(names))
+	for _, name := range names {
+		value := strings.TrimSpace(h.Get(name))
+		if value == "" {
+			continue
+		}
+		if len(value) > maxValueLength {
+			value = value[:maxValueLength] + "…"
+		}
+		parts = append(parts, name+"="+value)
+	}
+	return strings.Join(parts, ",")
 }
 
 // PutFile 使用 HTTP PUT 将文件上传到 WebDAV 路径 baseURL/filename。
@@ -62,7 +107,9 @@ func PutFile(ctx context.Context, baseURL, webdavUser, webdavPass, filename stri
 	}
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 	return &PutStatusError{
-		StatusCode: resp.StatusCode,
-		Body:       strings.TrimSpace(string(b)),
+		StatusCode:      resp.StatusCode,
+		TargetURL:       diagnosticTargetURL(u),
+		ResponseHeaders: diagnosticResponseHeaders(resp.Header),
+		Body:            strings.TrimSpace(string(b)),
 	}
 }
