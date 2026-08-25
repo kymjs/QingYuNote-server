@@ -30,21 +30,23 @@ import (
 )
 
 type Server struct {
-	Cfg         *config.Config
-	Store       *store.Store
-	qingyuGuard *qingyuWebDAVGuard
-	releaseManifests *release.Provider
+	Cfg                  *config.Config
+	Store                *store.Store
+	qingyuGuard          *qingyuWebDAVGuard
+	appMarketReportGuard *appMarketReportGuard
+	releaseManifests     *release.Provider
 	// smsQuota 公开短信（注册 / 重置密码）发送频控：每 IP、每手机号、每设备 ID 滑动 24h 各最多 3 次；见 sms_public_quota.go 与 TECHNICAL.md §2.11。
 	smsQuota *smsquota.Window
 }
 
 func NewServer(cfg *config.Config, st *store.Store) (*Server, error) {
 	s := &Server{
-		Cfg:              cfg,
-		Store:            st,
-		qingyuGuard:      newQingyuWebDAVGuard(),
-		releaseManifests: release.NewProvider(),
-		smsQuota:         smsquota.New(smsPublicQuotaPerWindow, 24*time.Hour),
+		Cfg:                  cfg,
+		Store:                st,
+		qingyuGuard:          newQingyuWebDAVGuard(),
+		appMarketReportGuard: newAppMarketReportGuard(),
+		releaseManifests:     release.NewProvider(),
+		smsQuota:             smsquota.New(smsPublicQuotaPerWindow, 24*time.Hour),
 	}
 	return s, nil
 }
@@ -64,6 +66,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/referral/claim", s.handleReferralClaim)
 	mux.HandleFunc("GET /api/v1/referral/history", s.handleReferralHistory)
 	mux.HandleFunc("POST /api/v1/vip-page/view", s.handleVipPageView)
+	mux.HandleFunc("POST /api/v1/app-market/version-report", s.handleAppMarketVersionReport)
 	mux.HandleFunc("POST /api/v1/me/referral/popup/impression", s.auth(s.handleReferralPopupImpression))
 	mux.HandleFunc("POST /api/v1/me/referral/popup/click", s.auth(s.handleReferralPopupClick))
 	mux.HandleFunc("POST /api/v1/me/link/wechat", s.auth(s.handleLinkWechat))

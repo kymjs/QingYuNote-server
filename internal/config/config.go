@@ -54,6 +54,8 @@ type Config struct {
 	AvatarWebDAVUsername string
 	AvatarWebDAVPassword string
 	AvatarPublicBaseURL  string
+	// 应用市场版本变更后写入会员配置；复用 Avatar WebDAV 的账号密码。
+	AppMarketWebDAVBaseURL string
 
 	PublicBaseURL string
 
@@ -87,15 +89,15 @@ type Config struct {
 	AliyunSMSTemplateParam string
 
 	// 管理后台（panel 前端调用）：登录凭据与兑换码签发密钥。
-	AdminUsername          string
-	AdminPassword          string
-	RedemptionIssueSecret  string
+	AdminUsername           string
+	AdminPassword           string
+	RedemptionIssueSecret   string
 	FeishuRedemptionWebhook string
 
 	// MiniMax Token Plan：客户端 AI 创建标签（GET /api/v1/me/ai-tag-config 下发，勿提交仓库）。
-	MiniMaxTokenPlanKey   string
-	MiniMaxModel          string
-	MiniMaxBaseURL        string
+	MiniMaxTokenPlanKey    string
+	MiniMaxModel           string
+	MiniMaxBaseURL         string
 	MiniMaxReasoningEffort string
 }
 
@@ -154,6 +156,9 @@ func Load() *Config {
 		AvatarWebDAVUsername: getenv("AVATAR_WEBDAV_USERNAME", ""),
 		AvatarWebDAVPassword: getenv("AVATAR_WEBDAV_PASSWORD", ""),
 		AvatarPublicBaseURL:  strings.TrimRight(getenv("AVATAR_PUBLIC_BASE_URL", "http://cdn.kymjs.com:8843/note-avatar"), "/"),
+		AppMarketWebDAVBaseURL: strings.TrimRight(
+			getenv("APP_MARKET_WEBDAV_BASE_URL", "https://nas.therouter.cn:5006/cdn/note"), "/",
+		),
 
 		PublicBaseURL: strings.TrimRight(getenv("PUBLIC_BASE_URL", "https://noteapi.kymjs.com"), "/"),
 
@@ -235,6 +240,12 @@ func (c *Config) QingyuWebDAVConfigured() bool {
 // AvatarWebDAVConfigured 为 true 时允许 POST /api/v1/me/avatar。
 func (c *Config) AvatarWebDAVConfigured() bool {
 	return strings.TrimSpace(c.AvatarWebDAVBaseURL) != "" &&
+		strings.TrimSpace(c.AvatarWebDAVUsername) != "" &&
+		strings.TrimSpace(c.AvatarWebDAVPassword) != ""
+}
+
+func (c *Config) AppMarketWebDAVConfigured() bool {
+	return strings.TrimSpace(c.AppMarketWebDAVBaseURL) != "" &&
 		strings.TrimSpace(c.AvatarWebDAVUsername) != "" &&
 		strings.TrimSpace(c.AvatarWebDAVPassword) != ""
 }

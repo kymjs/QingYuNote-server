@@ -113,3 +113,48 @@ func PutFile(ctx context.Context, baseURL, webdavUser, webdavPass, filename stri
 		Body:            strings.TrimSpace(string(b)),
 	}
 }
+
+// GetFile 读取 WebDAV 文件，限制最大大小，避免远端异常响应耗尽服务端内存。
+func GetFile(ctx context.Context, baseURL, webdavUser, webdavPass, filename string, maxBytes int64) ([]byte, error) {
+	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	fn := strings.TrimSpace(filename)
+	if base == "" {
+		return nil, errors.New("empty_base_url")
+	}
+	if fn == "" || strings.Contains(fn, "/") || strings.Contains(fn, "\\") {
+		return nil, errors.New("bad_filename")
+	}
+	if maxBytes <= 0 {
+		return nil, errors.New("invalid_max_bytes")
+	}
+	baseU, err := url.Parse(base)
+	if err != nil || baseU.Scheme == "" || baseU.Host == "" {
+		return nil, fmt.Errorf("parse_base: %w", err)
+	}
+	u := baseU.JoinPath(fn)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.SetBasicAuth(strings.TrimSpace(webdavUser), webdavPass)
+	resp, err := (&http.Client{Timeout: 3 * time.Minute}).Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, &PutStatusError{
+			StatusCode: resp.StatusCode, TargetURL: diagnosticTargetURL(u),
+			ResponseHeaders: diagnosticResponseHeaders(resp.Header), Body: strings.TrimSpace(string(b)),
+		}
+	}
+	b, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(b)) > maxBytes {
+		return nil, errors.New("response_too_large")
+	}
+	return b, nil
+}
