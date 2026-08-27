@@ -86,6 +86,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/me/profile/phone/sms/send", s.auth(s.handleSendProfilePhoneSms))
 	mux.HandleFunc("POST /api/v1/me/password/sms/send", s.auth(s.handleSendPasswordSms))
 	mux.HandleFunc("POST /api/v1/me/avatar", s.auth(s.handlePostAvatar))
+	mux.HandleFunc("GET /api/v1/me/app-store-review-campaign", s.auth(s.handleGetAppStoreReviewCampaign))
+	mux.HandleFunc("POST /api/v1/me/app-store-review-campaign/screenshot", s.auth(s.handlePostAppStoreReviewScreenshot))
 	mux.HandleFunc("DELETE /api/v1/me", s.auth(s.handleDeleteAccount))
 	mux.HandleFunc("PUT /api/v1/me/sync-settings", s.auth(s.handlePutSyncSettings))
 	mux.HandleFunc("POST /api/v1/me/sync-settings", s.auth(s.handlePutSyncSettings)) // Harmony @ohos.net.http 无 PUT

@@ -52,6 +52,8 @@
    - `migrations/009_user_sync_settings.sql`、`migrations/010_referral_campaign.sql`、`migrations/011_membership_grant_records.sql`
    - `migrations/012_referral_invite_v2.sql`、`migrations/013_invite_popup_events_user_index.sql`（邀请活动增强、邀请弹窗索引）
    - `migrations/014_vip_page_views.sql`（充值页 H5 打开埋点聚合表 `vip_page_views`；`CREATE TABLE IF NOT EXISTS`，可重复执行）
+   - `migrations/015_app_market_version_state.sql`（应用市场版本状态；`CREATE TABLE IF NOT EXISTS`，可重复执行）
+   - `migrations/016_app_store_review_campaign.sql`（应用市场好评活动 `app_store_review_campaign`；`CREATE TABLE IF NOT EXISTS`，可重复执行）
 4. **配置环境变量**：复制 `server/.env.example` 为机器上的机密文件（例如 `/etc/noteapi.env`），填写 `MYSQL_DSN`、`JWT_SECRET`、各业务变量。
 5. **编译**：在 `server` 目录执行 `go build -o /usr/local/bin/noteapi ./cmd/noteapi`（路径可自定）。
 6. **systemd**：使用 `scripts/noteapi.service` 模板，把 `EnvironmentFile` 指向上面的 env 文件，`ExecStart` 指向二进制与监听地址。
@@ -78,11 +80,12 @@
 
 1. 拉取最新代码（或上传新压缩包解压）。
 2. **若有新的 SQL 迁移**：在维护窗口先备份数据库（见下文「回滚」），再执行迁移，最后再起新版本二进制。
-   - 一键：`sudo ./scripts/deploy.sh migrate`（按 `deploy.local.env` 连接数据库，顺序执行 `migrations/[0-9][0-9][0-9]_*.sql`，含 `004`–`014` 等全部编号迁移，含充值页埋点表 `014_vip_page_views.sql`）。
-   - `001`、`002` 本身具备幂等或可重复特性；**`003_user_profile.sql`、`008_user_device_sessions_app_version.sql` 通过检测列是否已存在跳过重复 `ALTER`**；**`014_vip_page_views.sql` 为 `CREATE TABLE IF NOT EXISTS`**，已在运行且库里已有数据的实例也可安全执行（重复执行不会报错）。
+   - 一键：`sudo ./scripts/deploy.sh migrate`（按 `deploy.local.env` 连接数据库，顺序执行 `migrations/[0-9][0-9][0-9]_*.sql`，含 `004`–`016` 等全部编号迁移，含应用市场好评活动表 `016_app_store_review_campaign.sql`）。
+   - `001`、`002` 本身具备幂等或可重复特性；**`003_user_profile.sql`、`008_user_device_sessions_app_version.sql` 通过检测列是否已存在跳过重复 `ALTER`**；**`014`–`016` 为 `CREATE TABLE IF NOT EXISTS`**，已在运行且库里已有数据的实例也可安全执行（重复执行不会报错）。
    - 若在 `deploy.local.env` 设置 **`RUN_MIGRATE_ON_UPDATE=1`**，`sudo ./scripts/deploy.sh update` 会在编译前自动执行上述 migrate（须已配置 `MYSQL_*`）。
    - 若你只上线过旧二进制、从未执行过 `003`，发布含「个人信息」的版本前**必须先跑完 `003`**，再重启服务，否则读写资料相关接口会缺列。
    - 发布含 **panel「充值页埋点」** / `POST /api/v1/vip-page/view` 的版本前，须已执行 **`014_vip_page_views.sql`**（或完整 `migrate`），再 `update` 重启服务。
+   - 发布含 **应用市场好评活动**（`GET/POST /api/v1/me/app-store-review-campaign*`）的版本前，须已执行 **`016_app_store_review_campaign.sql`**（或完整 `migrate`），并在 `/etc/noteapi.env` 配好 **`MINIMAX_TOKEN_PLAN_KEY`** / **`MINIMAX_MODEL`**（截图审核）与 **`AVATAR_WEBDAV_*`**（截图按 user_id 存到头像同一 WebDAV 目录），再 `update` 重启服务。
 3. **若环境变量有新增项**：更新 `/etc/noteapi.env`（按 `server/.env.example` 逐项核对；例如用户头像依赖 **`AVATAR_WEBDAV_*`** 与 **`AVATAR_PUBLIC_BASE_URL`**（详见 `TECHNICAL.md` §2.7）；App Store 内购依赖 **`APPLE_IAP_*`**、**`APPLE_APP_STORE_APP_ID`**；iOS 微信 Universal Link 依赖 **`APPLE_APP_SITE_ASSOCIATION_TEAM_ID`**，且 API 域名须能访问 AASA 与 `/wx/login/`（见上文 §2.1）。**公开短信进程内频控**不引入新的 env 键；上线后只需确认反代 **`X-Forwarded-For`** 与多实例行为（见上文「反向代理」小条与 `TECHNICAL.md` 第 2.11 节）。
 4. **重新编译并重启服务**（或使用脚本）：
    ```bash

@@ -301,7 +301,8 @@ Apple verify 200：`status` 为 `paid`（或幂等时可为 `already_paid`）。
 | `APPLE_IAP_PRODUCT_MONTHLY` / `HALF_YEAR` / `YEARLY` | App Store 商品 ID，须与客户端、`plan_id` 映射一致 |
 | `APPLE_APP_STORE_APP_ID` | App Store Connect 中 App 的数字 Apple ID；正式环境 JWS 校验需要 |
 | `QINGYU_WEBDAV_BASE_URL` / `USERNAME` / `PASSWORD` | 轻羽 NAS 下发 |
-| `AVATAR_WEBDAV_BASE_URL` / `AVATAR_WEBDAV_USERNAME` / `AVATAR_WEBDAV_PASSWORD` | 用户头像：WebDAV 上传目标（三项齐全才启用 `POST /api/v1/me/avatar`） |
+| `AVATAR_WEBDAV_BASE_URL` / `AVATAR_WEBDAV_USERNAME` / `AVATAR_WEBDAV_PASSWORD` | 用户头像：WebDAV 上传目标（三项齐全才启用 `POST /api/v1/me/avatar`）；应用市场好评截图也写入同一目录（文件名 `{userId}.ext`） |
+| `MINIMAX_TOKEN_PLAN_KEY` / `MINIMAX_MODEL` / `MINIMAX_BASE_URL` | MiniMax：客户端 AI 标签配置，以及服务端应用市场好评截图审核（`POST /api/v1/me/app-store-review-campaign/screenshot`） |
 | `AVATAR_PUBLIC_BASE_URL` | 头像对外访问 URL 前缀（与 CDN 一致，不含末尾 `/`；默认见 `config.go`） |
 | `PUBLIC_BASE_URL` | 回调域名前缀 |
 | `WECHAT_PAY_*` | 商户号、序列号、私钥路径、APIv3 Key |

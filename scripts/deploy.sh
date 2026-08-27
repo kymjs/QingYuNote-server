@@ -138,10 +138,10 @@ cmd_first_time() {
 
   log ""
   log "后续手工步骤："
-  log "  1) 编辑 ${ENV_FILE}（至少 MYSQL_DSN、JWT_SECRET、业务密钥；头像上传与应用市场版本同步需 AVATAR_WEBDAV_USERNAME/PASSWORD，并确认 APP_MARKET_WEBDAV_BASE_URL 可读写 /cdn/note 下的 config.json、config_hw.json、ios.json；兑换码签发需 REDEMPTION_ISSUE_SECRET、FEISHU_REDEMPTION_WEBHOOK_URL，见 .env.example；可选取消注释 LOG_FILE= 以追加写文件日志）"
+  log "  1) 编辑 ${ENV_FILE}（至少 MYSQL_DSN、JWT_SECRET、业务密钥；头像上传、应用市场好评截图与版本同步需 AVATAR_WEBDAV_USERNAME/PASSWORD，并确认 APP_MARKET_WEBDAV_BASE_URL 可读写 /cdn/note 下的 config.json、config_hw.json、ios.json；应用市场好评审核需 MINIMAX_TOKEN_PLAN_KEY / MINIMAX_MODEL；兑换码签发需 REDEMPTION_ISSUE_SECRET、FEISHU_REDEMPTION_WEBHOOK_URL，见 .env.example；可选取消注释 LOG_FILE= 以追加写文件日志）"
   log "  2) MySQL 迁移（推荐在填写 scripts/deploy.local.env 的 MYSQL_* 后执行）:"
   log "       sudo ${SCRIPT_DIR}/deploy.sh migrate"
-  log "     （按文件名排序执行 migrations/[0-9][0-9][0-9]_*.sql，含 015_app_market_version_state.sql；详见 DEPLOYMENT.md）"
+  log "     （按文件名排序执行 migrations/[0-9][0-9][0-9]_*.sql，含 016_app_store_review_campaign.sql；详见 DEPLOYMENT.md）"
   log "  3) systemctl start ${SERVICE_NAME} && systemctl status ${SERVICE_NAME}"
   log "  4) 配置 Nginx/Caddy 反代到 LISTEN_ADDR（默认 :9443）；反代须传真实客户端 IP（X-Forwarded-For），否则公开短信频控的 IP 维度会失真（见 DEPLOYMENT.md 与 TECHNICAL.md 第 2.11 节）"
   log "  5) 签发兑换码（需在同一主机 source ${ENV_FILE} 或导出 MYSQL_DSN、REDEMPTION_ISSUE_SECRET）:"
@@ -235,7 +235,7 @@ cmd_migrate() {
     run_sql "${f}"
   done
   unset MYSQL_PWD
-  log "迁移完成（共 ${#sorted[@]} 个 SQL；003/008 等按列检测可跳过重复 ALTER，014/015 等 CREATE IF NOT EXISTS 可重复执行）"
+  log "迁移完成（共 ${#sorted[@]} 个 SQL；003/008 等按列检测可跳过重复 ALTER，014/015/016 等 CREATE IF NOT EXISTS 可重复执行）"
 }
 
 cmd_rollback() {
@@ -274,7 +274,7 @@ usage() {
   first-time   首次安装依赖、编译、安装 systemd（需 root）
   update       git pull（若存在 .git）、编译、重启服务（需 root）；若 export RUN_MIGRATE_ON_UPDATE=1 则先执行 migrate
   build-only   仅编译 noteapi 与 issue_redemption_codes 到 \${DEPLOY_ROOT}/bin/（默认不需 root）
-  migrate      按 deploy.local.env 中的 MYSQL_* 顺序执行 migrations/[0-9][0-9][0-9]_*.sql（含 014_vip_page_views 等；需 mysql 客户端）
+  migrate      按 deploy.local.env 中的 MYSQL_* 顺序执行 migrations/[0-9][0-9][0-9]_*.sql（含 016_app_store_review_campaign 等；需 mysql 客户端）
   rollback     用上次 update 备份的 *.prev 覆盖当前二进制并重启服务（需 root；依赖先前 BACKUP_BIN_ON_UPDATE=1）
 
 机密配置（勿提交 Git）:

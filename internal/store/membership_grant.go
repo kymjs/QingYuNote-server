@@ -8,10 +8,11 @@ import (
 )
 
 const (
-	GrantSourceWelcome       = "welcome"
-	GrantSourceInvited       = "invited"
-	GrantSourceInviteFriend  = "invite_friend"
+	GrantSourceWelcome        = "welcome"
+	GrantSourceInvited        = "invited"
+	GrantSourceInviteFriend   = "invite_friend"
 	GrantSourceInviteRecharge = "invite_recharge"
+	GrantSourceAppStoreReview = "app_store_review"
 )
 
 // MembershipGrantRecordParams 会籍赠送审计行。
@@ -27,7 +28,7 @@ type MembershipGrantRecordParams struct {
 func normalizeGrantSource(src string) (string, error) {
 	s := strings.TrimSpace(strings.ToLower(src))
 	switch s {
-	case GrantSourceWelcome, GrantSourceInvited, GrantSourceInviteFriend, GrantSourceInviteRecharge:
+	case GrantSourceWelcome, GrantSourceInvited, GrantSourceInviteFriend, GrantSourceInviteRecharge, GrantSourceAppStoreReview:
 		return s, nil
 	default:
 		return "", fmt.Errorf("invalid grant source")
@@ -75,10 +76,10 @@ func (s *Store) InsertMembershipGrantRecord(ctx context.Context, p *MembershipGr
 
 // AdminMembershipGrantRow 管理后台展示的会籍赠送记录。
 type AdminMembershipGrantRow struct {
-	Source    string
-	GrantDays int
+	Source      string
+	GrantDays   int
 	GrantMonths int
-	CreatedAt time.Time
+	CreatedAt   time.Time
 }
 
 // ListAdminMembershipGrantRecords 按用户查询会籍赠送审计。
@@ -152,6 +153,14 @@ func FormatMembershipGrantLabel(source string, grantDays, grantMonths int) strin
 			return fmt.Sprintf("邀请好友充值赠送%d天", grantDays)
 		}
 		return "邀请好友充值赠送"
+	case GrantSourceAppStoreReview:
+		if grantMonths > 0 {
+			return fmt.Sprintf("应用市场评价赠送%d个月", grantMonths)
+		}
+		if grantDays > 0 {
+			return fmt.Sprintf("应用市场评价赠送%d天", grantDays)
+		}
+		return "应用市场评价赠送"
 	default:
 		return ""
 	}
