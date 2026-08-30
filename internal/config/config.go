@@ -95,6 +95,18 @@ type Config struct {
 	FeishuRedemptionWebhook string
 	FeishuFeedbackWebhook   string
 
+	// 用户反馈写入飞书多维表格（与 Webhook 并存；未配齐则跳过写表）。
+	FeishuBitableAppID       string
+	FeishuBitableAppSecret   string
+	FeishuBitableAppToken    string
+	FeishuBitableTableID     string
+	FeishuBitableFieldMode   string // name | id，默认 name
+	FeishuBitableFieldContent     string
+	FeishuBitableFieldUserID      string
+	FeishuBitableFieldPhone       string
+	FeishuBitableFieldType        string // 可选
+	FeishuBitableFieldSubmittedAt string // 可选，日期字段写毫秒时间戳
+
 	// MiniMax Token Plan：客户端 AI 创建标签（GET /api/v1/me/ai-tag-config 下发，勿提交仓库）。
 	MiniMaxTokenPlanKey    string
 	MiniMaxModel           string
@@ -192,6 +204,17 @@ func Load() *Config {
 		RedemptionIssueSecret:   getenv("REDEMPTION_ISSUE_SECRET", ""),
 		FeishuRedemptionWebhook: getenv("FEISHU_REDEMPTION_WEBHOOK_URL", ""),
 		FeishuFeedbackWebhook:   getenv("FEISHU_FEEDBACK_WEBHOOK_URL", ""),
+
+		FeishuBitableAppID:            getenv("FEISHU_BITABLE_APP_ID", ""),
+		FeishuBitableAppSecret:        getenv("FEISHU_BITABLE_APP_SECRET", ""),
+		FeishuBitableAppToken:         getenv("FEISHU_BITABLE_APP_TOKEN", ""),
+		FeishuBitableTableID:          getenv("FEISHU_BITABLE_TABLE_ID", ""),
+		FeishuBitableFieldMode:        getenv("FEISHU_BITABLE_FIELD_MODE", "name"),
+		FeishuBitableFieldContent:     getenv("FEISHU_BITABLE_FIELD_CONTENT", ""),
+		FeishuBitableFieldUserID:      getenv("FEISHU_BITABLE_FIELD_USER_ID", ""),
+		FeishuBitableFieldPhone:       getenv("FEISHU_BITABLE_FIELD_PHONE", ""),
+		FeishuBitableFieldType:        getenv("FEISHU_BITABLE_FIELD_TYPE", ""),
+		FeishuBitableFieldSubmittedAt: getenv("FEISHU_BITABLE_FIELD_SUBMITTED_AT", ""),
 
 		MiniMaxTokenPlanKey:    getenv("MINIMAX_TOKEN_PLAN_KEY", ""),
 		MiniMaxModel:           getenv("MINIMAX_MODEL", "MiniMax-M2.7"),
@@ -427,6 +450,16 @@ func (c *Config) AdminConfigured() bool {
 // RedemptionIssueConfigured 为 true 时允许通过管理后台签发兑换码。
 func (c *Config) RedemptionIssueConfigured() bool {
 	return strings.TrimSpace(c.RedemptionIssueSecret) != ""
+}
+
+// FeishuBitableConfigured 为 true 时允许用户反馈写入飞书多维表格。
+func (c *Config) FeishuBitableConfigured() bool {
+	return strings.TrimSpace(c.FeishuBitableAppID) != "" &&
+		strings.TrimSpace(c.FeishuBitableAppSecret) != "" &&
+		strings.TrimSpace(c.FeishuBitableAppToken) != "" &&
+		strings.TrimSpace(c.FeishuBitableTableID) != "" &&
+		strings.TrimSpace(c.FeishuBitableFieldContent) != "" &&
+		strings.TrimSpace(c.FeishuBitableFieldUserID) != ""
 }
 
 const defaultMiniMaxBaseURL = "https://api.minimaxi.com/v1"

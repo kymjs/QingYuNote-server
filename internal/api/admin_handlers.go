@@ -412,7 +412,7 @@ func planTitleCN(plan string) string {
 }
 
 func feishuRedemptionBody(plan, code string) string {
-	return fmt.Sprintf("【轻羽云兑换码】\n类型：%s\n兑换码：%s\n打开APP->左上角菜单->个人信息->兑换码，输入兑换使用",
+	return fmt.Sprintf("【轻羽云兑换码】\n类型：%s\n兑换码：%s\n打开APP->点击头像->兑换码，输入兑换使用",
 		planTitleCN(plan), code)
 }
 
