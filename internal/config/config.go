@@ -93,6 +93,7 @@ type Config struct {
 	AdminPassword           string
 	RedemptionIssueSecret   string
 	FeishuRedemptionWebhook string
+	FeishuFeedbackWebhook   string
 
 	// MiniMax Token Plan：客户端 AI 创建标签（GET /api/v1/me/ai-tag-config 下发，勿提交仓库）。
 	MiniMaxTokenPlanKey    string
@@ -190,6 +191,7 @@ func Load() *Config {
 		AdminPassword:           getenv("ADMIN_PASSWORD", ""),
 		RedemptionIssueSecret:   getenv("REDEMPTION_ISSUE_SECRET", ""),
 		FeishuRedemptionWebhook: getenv("FEISHU_REDEMPTION_WEBHOOK_URL", ""),
+		FeishuFeedbackWebhook:   getenv("FEISHU_FEEDBACK_WEBHOOK_URL", ""),
 
 		MiniMaxTokenPlanKey:    getenv("MINIMAX_TOKEN_PLAN_KEY", ""),
 		MiniMaxModel:           getenv("MINIMAX_MODEL", "MiniMax-M2.7"),
