@@ -40,6 +40,8 @@ func (s *Server) handleSubmitFeedback(w http.ResponseWriter, r *http.Request) {
 	problemType := strings.TrimSpace(req.Type)
 	webhook := strings.TrimSpace(s.Cfg.FeishuFeedbackWebhook)
 	bitableOK := s.Cfg.FeishuBitableConfigured()
+	log.Printf("info: feedback submit user_id=%d webhook_configured=%v bitable_configured=%v content_runes=%d type=%q",
+		req.UserID, webhook != "", bitableOK, utf8.RuneCountInString(content), problemType)
 	if webhook == "" && !bitableOK {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "feedback_channel_not_configured"})
 		return
@@ -52,12 +54,16 @@ func (s *Server) handleSubmitFeedback(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "feishu_webhook_failed"})
 			return
 		}
+	} else {
+		log.Printf("info: feedback webhook skipped (empty FEISHU_FEEDBACK_WEBHOOK_URL)")
 	}
 	if bitableOK {
 		if err := postFeishuBitableFeedback(s.Cfg, content, req.UserID, phone, problemType); err != nil {
-			// 写表失败不阻断已成功的 webhook；仅打日志便于排查。
+			// 写表失败不阻断已成功的 webhook；详细原因已在 postFeishuBitableFeedback 内打出。
 			log.Printf("warning: feedback feishu bitable failed: %v", err)
 		}
+	} else {
+		log.Printf("info: feedback bitable skipped (FeishuBitableConfigured=false; need APP_ID/SECRET/APP_TOKEN/TABLE_ID/FIELD_CONTENT/FIELD_USER_ID)")
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
