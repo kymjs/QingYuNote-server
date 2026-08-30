@@ -17,7 +17,7 @@ type feedbackSubmitReq struct {
 }
 
 func feedbackFeishuBody(content string, userID int64, phone string) string {
-	return fmt.Sprintf("轻羽云笔记用户反馈：%s用户id:%d，手机号:%s", content, userID, phone)
+	return fmt.Sprintf("轻羽云笔记用户反馈：%s。用户id:%d，手机号:%s", content, userID, phone)
 }
 
 // handleSubmitFeedback 用户反馈 H5 提交：不落库；飞书 Webhook +（可选）多维表格双写。
