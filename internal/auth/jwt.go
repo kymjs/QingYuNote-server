@@ -16,6 +16,9 @@ const Issuer = "noteapi"
 // ScopeH5Pay marks a short-lived ticket usable only for VIP H5 page-pay APIs.
 const ScopeH5Pay = "h5_pay"
 
+// AccessTokenTTL is the default lifetime for user access JWTs (login + refresh).
+const AccessTokenTTL = 14 * 24 * time.Hour
+
 // H5PayTicketTTL is the default lifetime for H5 pay tickets (external browser).
 const H5PayTicketTTL = 5 * time.Minute
 

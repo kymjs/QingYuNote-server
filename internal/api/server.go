@@ -57,6 +57,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/auth/huawei", s.handleAuthHuawei)
 	mux.HandleFunc("POST /api/v1/auth/apple", s.handleAuthApple)
 	mux.HandleFunc("POST /api/v1/auth/phone", s.handleAuthPhone)
+	mux.HandleFunc("POST /api/v1/auth/refresh", s.auth(s.handleAuthRefresh))
 	mux.HandleFunc("POST /api/v1/password/reset/check-phone", s.handlePasswordResetCheckPhone)
 	mux.HandleFunc("POST /api/v1/password/reset/sms/send", s.handleSendPasswordResetSms)
 	mux.HandleFunc("POST /api/v1/password/reset", s.handlePasswordResetConfirm)
@@ -195,7 +196,17 @@ type authLoginResp struct {
 }
 
 func (s *Server) issueAuthToken(w http.ResponseWriter, userID int64, platform, deviceID, appVersion string) bool {
-	tok, err := auth.SignAccessToken(userID, s.Cfg.JWTSecret, 7*24*time.Hour)
+	return s.writeAuthTokenResponse(w, userID, platform, deviceID, appVersion)
+}
+
+// handleAuthRefresh re-issues a full-TTL access token for a still-valid Bearer session.
+func (s *Server) handleAuthRefresh(w http.ResponseWriter, r *http.Request, userID int64) {
+	platform, deviceID, appVersion := extractDeviceInfo(r)
+	_ = s.writeAuthTokenResponse(w, userID, platform, deviceID, appVersion)
+}
+
+func (s *Server) writeAuthTokenResponse(w http.ResponseWriter, userID int64, platform, deviceID, appVersion string) bool {
+	tok, err := auth.SignAccessToken(userID, s.Cfg.JWTSecret, auth.AccessTokenTTL)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "token_failed"})
 		return false
@@ -209,7 +220,7 @@ func (s *Server) issueAuthToken(w http.ResponseWriter, userID int64, platform, d
 	}
 	resp := authLoginResp{
 		AccessToken: tok,
-		ExpiresIn:   int64((7 * 24 * time.Hour).Seconds()),
+		ExpiresIn:   int64(auth.AccessTokenTTL.Seconds()),
 		UserID:      userID,
 	}
 	writeJSON(w, http.StatusOK, resp)

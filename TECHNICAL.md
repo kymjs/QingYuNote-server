@@ -10,7 +10,7 @@
 |------|------|------|
 | 入口 | `cmd/noteapi/main.go` | 加载配置、连接 MySQL、构造 `api.Server`、监听 `LISTEN_ADDR` |
 | HTTP | `internal/api/server.go` | 路由、鉴权中间件 `auth`、各 Handler |
-| 鉴权 | `internal/auth/jwt.go` | HS256 JWT：`sub` 为 `users.id`，默认 TTL 7 天 |
+| 鉴权 | `internal/auth/jwt.go` | HS256 JWT：`sub` 为 `users.id`，默认 TTL 14 天（登录与 refresh 共用） |
 | 配置 | `internal/config/config.go` | 环境变量 → `Config`，套餐金额与周期 |
 | 持久化 | `internal/store/*.go` | MySQL：`Store` 封装 CRUD / 事务 |
 | 订阅逻辑 | `internal/subscription/extend.go` | 支付成功后顺延订阅；对外状态枚举 |
@@ -51,8 +51,9 @@
 | POST | `/api/v1/auth/wechat` | `{ "code": "<微信 OAuth code>" }` | 换 openid， upsert 用户与身份 |
 | POST | `/api/v1/auth/huawei` | `{ "authorization_code", "redirect_uri?" }` | 需服务端配置 `HUAWEI_*` |
 | POST | `/api/v1/auth/apple` | `{ "identity_token": "<Apple JWT>" }` | 需 `APPLE_CLIENT_ID` |
+| POST | `/api/v1/auth/refresh` | 空 body（需 Bearer） | 用**未过期** access token 换发新的 14 天 JWT；响应字段同登录 |
 
-**常见错误 JSON**：`{"error":"invalid_body"}` 400；OAuth 失败带 `wechat_oauth_failed` / `huawei_oauth_failed` / `apple_token_invalid`；华为/Apple 未配置时 503 及对应 `*_not_configured`。
+**常见错误 JSON**：`{"error":"invalid_body"}` 400；OAuth 失败带 `wechat_oauth_failed` / `huawei_oauth_failed` / `apple_token_invalid`；华为/Apple 未配置时 503 及对应 `*_not_configured`；refresh 无/坏/过期 Bearer → 401。
 
 ### 2.3 绑定第三方身份（需登录）
 
