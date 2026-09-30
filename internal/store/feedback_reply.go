@@ -12,6 +12,7 @@ type FeedbackReplyRow struct {
 	UserID          int64
 	FeedbackContent string
 	FeedbackType    string
+	FeedbackAt      time.Time
 	OfficialReply   string
 	CreatedAt       time.Time
 }
@@ -21,13 +22,13 @@ func (s *Store) InsertFeedbackReply(
 	ctx context.Context,
 	userID int64,
 	feedbackContent, feedbackType, officialReply string,
-	now time.Time,
+	feedbackAt, now time.Time,
 ) (int64, error) {
 	res, err := s.DB.ExecContext(ctx, `
 INSERT INTO feedback_replies
-  (user_id, feedback_content, feedback_type, official_reply, created_at)
-VALUES (?, ?, ?, ?, ?)`,
-		userID, feedbackContent, feedbackType, officialReply, now)
+  (user_id, feedback_content, feedback_type, feedback_at, official_reply, created_at)
+VALUES (?, ?, ?, ?, ?, ?)`,
+		userID, feedbackContent, feedbackType, feedbackAt, officialReply, now)
 	if err != nil {
 		return 0, err
 	}
@@ -38,12 +39,12 @@ VALUES (?, ?, ?, ?, ?)`,
 func (s *Store) GetLatestFeedbackReplyByUserID(ctx context.Context, userID int64) (*FeedbackReplyRow, error) {
 	var r FeedbackReplyRow
 	err := s.DB.QueryRowContext(ctx, `
-SELECT id, user_id, feedback_content, feedback_type, official_reply, created_at
+SELECT id, user_id, feedback_content, feedback_type, feedback_at, official_reply, created_at
 FROM feedback_replies
 WHERE user_id = ?
 ORDER BY id DESC
 LIMIT 1`, userID).Scan(
-		&r.ID, &r.UserID, &r.FeedbackContent, &r.FeedbackType, &r.OfficialReply, &r.CreatedAt,
+		&r.ID, &r.UserID, &r.FeedbackContent, &r.FeedbackType, &r.FeedbackAt, &r.OfficialReply, &r.CreatedAt,
 	)
 	if err != nil {
 		return nil, err

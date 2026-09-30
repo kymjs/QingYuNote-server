@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS feedback_replies (
   user_id BIGINT NOT NULL,
   feedback_content TEXT NOT NULL,
   feedback_type VARCHAR(64) NOT NULL DEFAULT '',
+  feedback_at DATETIME(3) NOT NULL COMMENT '用户反馈时间（调用方传入）',
   official_reply TEXT NOT NULL,
   created_at DATETIME(3) NOT NULL,
   KEY idx_feedback_replies_user_id_id (user_id, id DESC),
