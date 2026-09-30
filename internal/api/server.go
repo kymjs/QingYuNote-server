@@ -68,6 +68,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/referral/history", s.handleReferralHistory)
 	mux.HandleFunc("POST /api/v1/vip-page/view", s.handleVipPageView)
 	mux.HandleFunc("POST /api/v1/feedback", s.handleSubmitFeedback)
+	mux.HandleFunc("POST /api/v1/feedback/reply", s.handleCreateFeedbackReply)
+	mux.HandleFunc("GET /api/v1/me/feedback-reply", s.auth(s.handleGetMyFeedbackReply))
 	mux.HandleFunc("POST /api/v1/app-market/version-report", s.handleAppMarketVersionReport)
 	mux.HandleFunc("POST /api/v1/me/referral/popup/impression", s.auth(s.handleReferralPopupImpression))
 	mux.HandleFunc("POST /api/v1/me/referral/popup/click", s.auth(s.handleReferralPopupClick))
