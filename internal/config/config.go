@@ -165,12 +165,12 @@ func Load() *Config {
 		QingyuWebDAVUsername: getenv("QINGYU_WEBDAV_USERNAME", ""),
 		QingyuWebDAVPassword: getenv("QINGYU_WEBDAV_PASSWORD", ""),
 
-		AvatarWebDAVBaseURL:  getenv("AVATAR_WEBDAV_BASE_URL", "https://cdn.therouter.cn:5006/cdn/note-avatar"),
+		AvatarWebDAVBaseURL:  getenv("AVATAR_WEBDAV_BASE_URL", "https://cdn.kymjs.com:5006/cdn/note-avatar"),
 		AvatarWebDAVUsername: getenv("AVATAR_WEBDAV_USERNAME", ""),
 		AvatarWebDAVPassword: getenv("AVATAR_WEBDAV_PASSWORD", ""),
 		AvatarPublicBaseURL:  strings.TrimRight(getenv("AVATAR_PUBLIC_BASE_URL", "http://cdn.kymjs.com:8843/note-avatar"), "/"),
 		AppMarketWebDAVBaseURL: strings.TrimRight(
-			getenv("APP_MARKET_WEBDAV_BASE_URL", "https://cdn.therouter.cn:5006/cdn/note"), "/",
+			getenv("APP_MARKET_WEBDAV_BASE_URL", "https://cdn.kymjs.com:5006/cdn/note"), "/",
 		),
 
 		PublicBaseURL: strings.TrimRight(getenv("PUBLIC_BASE_URL", "https://noteapi.kymjs.com"), "/"),
